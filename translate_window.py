@@ -24,9 +24,7 @@ def load_model():
         print("No model found")
 
 
-# =========================
-# MEDIAPIPE
-# =========================
+
 mp_hands = mp.solutions.hands
 
 mp_draw = mp.solutions.drawing_utils
@@ -39,9 +37,6 @@ hands = mp_hands.Hands(
 )
 
 
-# =========================
-# TRANSLATE
-# =========================
 def start_translate():
     load_model()
 
@@ -86,18 +81,12 @@ def start_translate():
                     landmarks
                 )
 
-                # =========================
-                # PREDICT
-                # =========================
                 prediction = model.predict(
                     [vector]
                 )
 
                 translated_text = prediction[0]
 
-                # =========================
-                # BOX
-                # =========================
                 x_list = []
                 y_list = []
 
@@ -138,18 +127,13 @@ def start_translate():
             frame
         )
 
-        # =========================
-        # KEY EVENT
-        # =========================
         key = cv2.waitKey(1)
 
         # Q TO EXIT
         if key & 0xFF == ord('q'):
             break
 
-        # =========================
-        # WINDOW CLOSED
-        # =========================
+
         try:
 
             visible = cv2.getWindowProperty(

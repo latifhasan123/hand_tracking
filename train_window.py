@@ -9,17 +9,11 @@ import pandas as pd
 
 def hand_vectorlize(landmarks):
 
-    # ==========================================
-    # LANDMARKS -> NUMPY
-    # ==========================================
     landmarks_np = np.array([
         [lm.x, lm.y, lm.z]
         for lm in landmarks
     ])
 
-    # ==========================================
-    # PALM ORIENTATION
-    # ==========================================
     palm = compute_palm_orientation(
         landmarks_np
     )
@@ -28,10 +22,6 @@ def hand_vectorlize(landmarks):
     spread = palm["spread"]
     normal = palm["normal"]
 
-    # ==========================================
-    # FINGER BEND
-    # Các hàm đã normalize 0 -> 1
-    # ==========================================
     angles = [
 
         # THUMB
@@ -99,9 +89,6 @@ def hand_vectorlize(landmarks):
             landmarks[20]
         ),
 
-        # ==========================================
-        # FINGER SPREAD
-        # ==========================================
         calculate_finger_angle(
             landmarks[1], landmarks[4],
             landmarks[5], landmarks[8]
@@ -123,10 +110,6 @@ def hand_vectorlize(landmarks):
         )
     ]
 
-    # ==========================================
-    # FULL FEATURE VECTOR
-    # 14 + 3 + 3 + 3 = 23D
-    # ==========================================
     feature = np.concatenate([
 
         np.array(angles),
@@ -137,9 +120,6 @@ def hand_vectorlize(landmarks):
 
     ])
 
-    # ==========================================
-    # ROUND
-    # ==========================================
     feature = np.round(
         feature,
         4
@@ -147,9 +127,6 @@ def hand_vectorlize(landmarks):
 
     return feature
 
-# =========================
-# MEDIAPIPE
-# =========================
 mp_hands = mp.solutions.hands
 mp_draw = mp.solutions.drawing_utils
 
@@ -161,9 +138,6 @@ hands = mp_hands.Hands(
 )
 
 
-# =========================
-# SAVE DATASET
-# =========================
 def save_to_csv(label, vector):
 
     row = [label] + vector.tolist()
@@ -178,9 +152,6 @@ def save_to_csv(label, vector):
     )
 
 
-# =========================
-# TRAIN WINDOW
-# =========================
 def train_new_word_window(parent):
 
     root = tk.Toplevel(parent)
@@ -189,9 +160,7 @@ def train_new_word_window(parent):
 
     root.geometry("1000x700")
 
-    # =========================
-    # LEFT PANEL
-    # =========================
+
     left_frame = tk.Frame(root, width=300)
 
     left_frame.pack(
@@ -224,9 +193,6 @@ def train_new_word_window(parent):
 
     status_label.pack(pady=10)
 
-    # =========================
-    # CAMERA PANEL
-    # =========================
     right_frame = tk.Frame(root)
 
     right_frame.pack(
@@ -245,9 +211,6 @@ def train_new_word_window(parent):
 
     current_vector = None
 
-    # =========================
-    # SAVE SAMPLE
-    # =========================
     def save_sample():
 
         nonlocal sample_count
@@ -267,9 +230,6 @@ def train_new_word_window(parent):
 
             print("Saved")
 
-    # =========================
-    # SAVE BUTTON
-    # =========================
     save_button = tk.Button(
         left_frame,
         text="Save Sample",
@@ -279,9 +239,6 @@ def train_new_word_window(parent):
 
     save_button.pack(pady=20)
 
-    # =========================
-    # UPDATE CAMERA
-    # =========================
     def update_frame():
 
         nonlocal current_vector
@@ -317,9 +274,7 @@ def train_new_word_window(parent):
                         landmarks
                     )
 
-                    # =========================
-                    # BOUNDING BOX
-                    # =========================
+                
                     x_list = []
                     y_list = []
 
@@ -372,9 +327,7 @@ def train_new_word_window(parent):
 
         root.after(10, update_frame)
 
-    # =========================
-    # CLOSE WINDOW
-    # =========================
+
     def on_close():
 
         cap.release()

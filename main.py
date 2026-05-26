@@ -6,17 +6,12 @@ from train_model import train_model
 from translate_window import start_translate
 
 
-# =========================
-# TRAIN DATA WINDOW
-# =========================
+
 def open_train_window():
 
     train_new_word_window(root)
 
 
-# =========================
-# TRAIN MODEL
-# =========================
 def run_train_model():
 
     try:
@@ -36,17 +31,11 @@ def run_train_model():
         )
 
 
-# =========================
-# TRANSLATE
-# =========================
 def open_translate():
 
     start_translate()
 
 
-# =========================
-# MAIN WINDOW
-# =========================
 root = tk.Tk()
 
 root.title("Hand Sign Translator")
@@ -63,9 +52,6 @@ title = tk.Label(
 title.pack(pady=30)
 
 
-# =========================
-# BUTTON TRAIN DATA
-# =========================
 train_data_button = tk.Button(
 
     root,
@@ -84,9 +70,6 @@ train_data_button = tk.Button(
 train_data_button.pack(pady=10)
 
 
-# =========================
-# BUTTON TRAIN MODEL
-# =========================
 train_model_button = tk.Button(
 
     root,
@@ -105,9 +88,6 @@ train_model_button = tk.Button(
 train_model_button.pack(pady=10)
 
 
-# =========================
-# BUTTON TRANSLATE
-# =========================
 translate_button = tk.Button(
 
     root,
