@@ -1,5 +1,4 @@
 import cv2
-import pickle
 import mediapipe as mp
 
 from train_window import hand_vectorlize
