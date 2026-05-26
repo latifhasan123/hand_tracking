@@ -1,6 +1,6 @@
 import cv2
 import mediapipe as mp
-
+from sklearn.neighbors import KNeighborsClassifier
 from train_window import hand_vectorlize
 
 import pickle
@@ -80,11 +80,21 @@ def start_translate():
                     landmarks
                 )
 
-                prediction = model.predict(
-                    [vector]
-                )
+                distances, indices = model.kneighbors([vector])
 
-                translated_text = prediction[0]
+                min_distance = distances[0][0]
+
+                THRESHOLD = 0.45
+
+                if min_distance < THRESHOLD:
+
+                    prediction = model.predict([vector])
+
+                    translated_text = prediction[0]
+
+                else:
+
+                    translated_text = "UNKNOWN"
 
                 x_list = []
                 y_list = []
