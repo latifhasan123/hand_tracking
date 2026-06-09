@@ -1,14 +1,15 @@
-import tkinter as tk
-
-# Sửa lại dòng này: Gọi hàm từ file 'ui' thay vì 'menu_window'
+import customtkinter as ctk
 from ui import create_main_menu
 
 if __name__ == "__main__":
-    # 1. Khởi tạo cửa sổ gốc của Tkinter
-    root = tk.Tk()
+    # Kích hoạt giao diện Dark Mode (Tối) thời thượng
+    ctk.set_appearance_mode("Dark")
+    # Đặt tông màu chủ đạo cho các hiệu ứng là màu xanh lam
+    ctk.set_default_color_theme("blue") 
+
+    # Khởi tạo cửa sổ gốc bằng CustomTkinter thay vì tk.Tk()
+    root = ctk.CTk()
     
-    # 2. Gọi thợ vẽ giao diện từ file ui.py để vẽ các nút bấm
     create_main_menu(root)
     
-    # 3. Kích hoạt chương trình chạy vòng lặp chính
     root.mainloop()
