@@ -14,7 +14,8 @@ hands = mp_hands.Hands(
 )
 
 # --- THUẬT TOÁN TOÁN HỌC TRÍCH XUẤT ĐẶC TRƯNG ---
-def hand_vectorlize(landmarks):
+# Cập nhật hàm để nhận thêm biến hand_type (0 hoặc 1)
+def hand_vectorlize(landmarks, hand_type):
     landmarks_np = np.array([[lm.x, lm.y, lm.z] for lm in landmarks])
     palm = compute_palm_orientation(landmarks_np)
     
@@ -39,7 +40,9 @@ def hand_vectorlize(landmarks):
         calculate_finger_angle(landmarks[13], landmarks[16], landmarks[17], landmarks[20])
     ]
 
-    feature = np.concatenate([np.array(angles), direction, spread, normal])
+    # SIÊU NÂNG CẤP: Ghép thêm hand_type vào ĐẦU mảng vector
+    feature = np.concatenate([[hand_type], np.array(angles), direction, spread, normal])
+    
     return np.round(feature, 4)
 
 # --- THUẬT TOÁN LƯU DỮ LIỆU ---

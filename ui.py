@@ -174,7 +174,7 @@ def create_main_menu(root):
                 import numpy as np
                 try:
                     # Tạo một bàn tay ảo (Mảng chứa 23 số 0 tương ứng với 23 đặc trưng góc ngón tay)
-                    dummy_vector = np.zeros(23)
+                    dummy_vector = np.zeros(24)
                     # Ép AI chạy dự đoán nháp ngay trong nền để "làm nóng" RAM
                     model.kneighbors([dummy_vector]) 
                 except:
@@ -228,11 +228,19 @@ def create_main_menu(root):
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = hands.process(rgb_frame)
 
-                if results.multi_hand_landmarks:
-                    for hand_landmarks in results.multi_hand_landmarks:
+                if results.multi_hand_landmarks and results.multi_handedness:
+                    for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
                         mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                        
+                        # --- XỬ LÝ NHẬN DIỆN TRÁI/PHẢI ---
+                        hand_label = handedness.classification[0].label
+                        # Quy ước: Left (Trái) = 0, Right (Phải) = 1
+                        hand_type = 0 if hand_label == "Left" else 1
+
                         landmarks = hand_landmarks.landmark
-                        current_vector = hand_vectorlize(landmarks)
+                        
+                        # Truyền thêm hand_type vào hàm vectorlize
+                        current_vector = hand_vectorlize(landmarks, hand_type)
 
                         x_list = [int(lm.x * w) for lm in landmarks]
                         y_list = [int(lm.y * h) for lm in landmarks]
@@ -242,11 +250,17 @@ def create_main_menu(root):
 
                         display_text = ""
                         if is_testing and model is not None:
-                            display_text = predict_sign(model, current_vector)
+                            # 1. Lấy kết quả thô từ AI
+                            raw_text = predict_sign(model, current_vector)
+                            
+                            # 2. CHUYỂN ĐỔI: Nếu là UNKNOWN thì hô biến thành "..."
+                            display_text = "..." if raw_text == "UNKNOWN" else raw_text
+                            
+                            # Cập nhật kết quả lên màn hình (Giữ nguyên chữ "Dịch: " của Admin)
                             result_label.configure(text=f"Dịch: {display_text}")
                             
-                            # Cập nhật lịch sử nếu đoán ra chữ mới
-                            if display_text != "UNKNOWN" and display_text != last_detected:
+                            # 3. Cập nhật lịch sử (Bỏ qua dấu "...")
+                            if display_text != "..." and display_text != last_detected:
                                 history_list.append(display_text)
                                 if len(history_list) > 6: # Chỉ giữ lại 6 chữ gần nhất
                                     history_list.pop(0)

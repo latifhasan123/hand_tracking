@@ -8,7 +8,7 @@ def load_model():
             return pickle.load(f)
     return None
 
-def predict_sign(model, vector, threshold=0.45):
+def predict_sign(model, vector, threshold=0.25):
     """Thuật toán dự đoán chữ cái dựa trên khoảng cách KNN"""
     if model is None:
         return "..."
