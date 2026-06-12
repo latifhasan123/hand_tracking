@@ -1,17 +1,14 @@
 import customtkinter as ctk
 from tkinter import messagebox
 import cv2
-from PIL import Image, ImageTk
 import numpy as np
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 
 # Gọi các thuật toán xử lý hình ảnh và nhận diện
 from train_window import hand_vectorlize, hands, mp_draw, mp_hands
 from translate_window import load_model, predict_sign
 
 def create_user_menu(root):
-    # ==========================================
-    # THIẾT LẬP CỬA SỔ TRUNG TÂM
-    # ==========================================
     root.title("Hand Sign Translator - Ứng dụng phiên dịch")
     window_width = 1100
     window_height = 700
@@ -22,9 +19,6 @@ def create_user_menu(root):
     y_cordinate = int((screen_height / 2) - (window_height / 2))
     root.geometry(f"{window_width}x{window_height}+{x_cordinate}+{y_cordinate}")
 
-    # ==========================================
-    # LOAD AI NGAY KHI MỞ APP (Làm nóng trước)
-    # ==========================================
     model = load_model()
     if model is not None:
         try:
@@ -33,14 +27,11 @@ def create_user_menu(root):
         except:
             pass
 
-    # ==========================================
-    # BIẾN QUẢN LÝ
-    # ==========================================
     cap = None
     is_camera_on = False
-    
     history_list = []
     last_detected = ""
+    current_sentence = "" 
 
     # ==========================================
     # KHU VỰC ĐIỀU KHIỂN (BÊN TRÁI)
@@ -51,16 +42,12 @@ def create_user_menu(root):
 
     title = ctk.CTkLabel(left_frame, text="PHIÊN DỊCH KÝ HIỆU", font=ctk.CTkFont(size=24, weight="bold"), text_color="#2196F3")
     title.pack(pady=(30, 10))
-    
-    desc = ctk.CTkLabel(left_frame, text="Hãy giơ tay lên trước camera\nđể ứng dụng tự động nhận diện.", font=ctk.CTkFont(size=14), text_color="gray60")
-    desc.pack(pady=(0, 20))
 
-    # --- ĐIỀU KHIỂN CAMERA (Tự động dịch) ---
     def toggle_camera():
-        nonlocal cap, is_camera_on, last_detected, history_list
+        nonlocal cap, is_camera_on, last_detected, history_list, current_sentence
         
         if model is None:
-            messagebox.showerror("Lỗi hệ thống", "Không tìm thấy bộ não AI (model.pkl). Vui lòng liên hệ Quản trị viên!")
+            messagebox.showerror("Lỗi", "Không tìm thấy bộ não AI (model.pkl). Vui lòng liên hệ Quản trị viên!")
             return
 
         if not is_camera_on:
@@ -72,32 +59,71 @@ def create_user_menu(root):
             update_frame()
         else:
             is_camera_on = False
-            if cap:
-                cap.release()
+            if cap: cap.release()
             video_label.configure(image="")
             camera_border.pack_forget() 
             history_frame.pack_forget()
             cam_btn.configure(text="Bật Camera", fg_color="#4CAF50", hover_color="#388E3C")
             
-            # Reset lại kết quả khi tắt cam
             result_label.configure(text="...")
             history_list.clear()
             last_detected = ""
             history_label.configure(text="Lịch sử: ")
 
     cam_btn = ctk.CTkButton(left_frame, text="Bật Camera", font=ctk.CTkFont(size=16, weight="bold"),
-                            fg_color="#4CAF50", hover_color="#388E3C", height=50, command=toggle_camera)
+                            fg_color="#4CAF50", hover_color="#388E3C", height=45, command=toggle_camera)
     cam_btn.pack(fill="x", padx=30, pady=10)
 
-    ctk.CTkFrame(left_frame, height=2, fg_color="gray50").pack(fill="x", padx=20, pady=20)
+    # --- TÍNH NĂNG TỪ ĐIỂN TRA CỨU ---
+    def show_dictionary():
+        dict_window = ctk.CTkToplevel(root)
+        dict_window.title("Từ điển Ký hiệu Tiếng Việt")
+        dict_window.geometry("700x550")
+        dict_window.attributes("-topmost", True) # Luôn nổi lên trên
+        
+        try:
+            img = Image.open("vsl_dict.gif")
+            # Thu phóng ảnh cho vừa với cửa sổ popup
+            img = img.resize((660, 500), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            
+            lbl = ctk.CTkLabel(dict_window, text="", image=photo)
+            lbl.image = photo 
+            lbl.pack(padx=20, pady=20)
+        except Exception:
+            err_text = "⚠️ Không tìm thấy ảnh từ điển!\n\nBạn hãy lưu một tấm ảnh bảng chữ cái,\nđổi tên thành 'vsl_dict.jpg' và để\nvào chung thư mục với file code nhé."
+            err = ctk.CTkLabel(dict_window, text=err_text, font=ctk.CTkFont(size=16), text_color="#FF9800")
+            err.pack(expand=True)
 
-    # --- HIỂN THỊ KẾT QUẢ TẬP TRUNG ---
+    dict_btn = ctk.CTkButton(left_frame, text="📖 Từ điển (Cheat Sheet)", font=ctk.CTkFont(size=14, weight="bold"),
+                             fg_color="#FF9800", hover_color="#F57C00", height=40, command=show_dictionary)
+    dict_btn.pack(fill="x", padx=30, pady=(0, 10))
+
+    ctk.CTkFrame(left_frame, height=2, fg_color="gray50").pack(fill="x", padx=20, pady=5)
+
+    # --- KHU VỰC HIỂN THỊ KẾT QUẢ VÀ VĂN BẢN ---
     result_container = ctk.CTkFrame(left_frame, fg_color="transparent")
-    result_container.pack(fill="both", expand=True, pady=20)
+    result_container.pack(fill="both", expand=True, pady=5)
     
-    ctk.CTkLabel(result_container, text="KẾT QUẢ DỊCH", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(30, 10))
-    result_label = ctk.CTkLabel(result_container, text="...", font=ctk.CTkFont(size=80, weight="bold"), text_color="#FF9800")
-    result_label.pack(pady=10)
+    ctk.CTkLabel(result_container, text="KẾT QUẢ DỊCH", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(5, 0))
+    result_label = ctk.CTkLabel(result_container, text="...", font=ctk.CTkFont(size=60, weight="bold"), text_color="#FF9800")
+    result_label.pack(pady=5)
+
+    ctk.CTkLabel(result_container, text="VĂN BẢN ĐÃ GHÉP", font=ctk.CTkFont(size=16, weight="bold"), text_color="#4CAF50").pack(pady=(10, 5))
+    sentence_box = ctk.CTkTextbox(result_container, height=100, font=ctk.CTkFont(size=20), wrap="word")
+    sentence_box.pack(fill="x", padx=20, pady=5)
+    sentence_box.insert("0.0", "")
+    sentence_box.configure(state="disabled")
+
+    def clear_text():
+        nonlocal current_sentence
+        current_sentence = ""
+        sentence_box.configure(state="normal")
+        sentence_box.delete("0.0", "end")
+        sentence_box.configure(state="disabled")
+
+    ctk.CTkButton(result_container, text="Xóa văn bản", command=clear_text, font=ctk.CTkFont(weight="bold"), 
+                  fg_color="#F44336", hover_color="#D32F2F").pack(pady=10)
 
     # ==========================================
     # KHU VỰC CAMERA (BÊN PHẢI)
@@ -114,7 +140,7 @@ def create_user_menu(root):
     history_label.pack(padx=20, pady=10, anchor="w")
 
     def update_frame():
-        nonlocal last_detected, history_list
+        nonlocal last_detected, history_list, current_sentence
         if is_camera_on and cap is not None:
             success, frame = cap.read()
             if success:
@@ -128,10 +154,7 @@ def create_user_menu(root):
                 if results.multi_hand_landmarks and results.multi_handedness:
                     for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
                         mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-                        
-                        hand_label = handedness.classification[0].label
-                        hand_type = 0 if hand_label == "Left" else 1
-
+                        hand_type = 0 if handedness.classification[0].label == "Left" else 1
                         landmarks = hand_landmarks.landmark
                         current_vector = hand_vectorlize(landmarks, hand_type)
 
@@ -142,34 +165,53 @@ def create_user_menu(root):
                         cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
 
                         if model is not None:
-                            # Lấy kết quả gốc từ AI
                             raw_text = predict_sign(model, current_vector)
-                            
-                            # CHUYỂN ĐỔI: Nếu là UNKNOWN thì hiển thị "..."
                             display_text = "..." if raw_text == "UNKNOWN" else raw_text
-                            
                             result_label.configure(text=display_text)
                             
-                            # THUẬT TOÁN LỊCH SỬ (Chống nhiễu dấu ...)
-                            if display_text != "..." and display_text != last_detected:
-                                history_list.append(display_text)
-                                if len(history_list) > 6:
-                                    history_list.pop(0)
-                                history_label.configure(text="Lịch sử: " + " ➔ ".join(history_list))
+                            # XỬ LÝ LỊCH SỬ VÀ VĂN BẢN (Đã sửa lỗi gõ lặp chữ)
+                            if display_text != last_detected:
+                                if display_text != "...":
+                                    history_list.append(display_text)
+                                    if len(history_list) > 6:
+                                        history_list.pop(0)
+                                    history_label.configure(text="Lịch sử: " + " ➔ ".join(history_list))
+                                    
+                                    if display_text == "SPACE":
+                                        current_sentence += " "
+                                    elif display_text == "DEL":
+                                        current_sentence = current_sentence[:-1]
+                                    elif display_text == "CLEAR":
+                                        current_sentence = ""
+                                    elif len(display_text) == 1:
+                                        current_sentence += display_text 
+                                    else:
+                                        if len(current_sentence) > 0 and current_sentence[-1] != " ":
+                                            current_sentence += " "
+                                        current_sentence += display_text + " "
+
+                                    sentence_box.configure(state="normal")
+                                    sentence_box.delete("0.0", "end")
+                                    sentence_box.insert("0.0", current_sentence)
+                                    sentence_box.configure(state="disabled")
+
                                 last_detected = display_text
 
-                        cv2.putText(frame, str(display_text), (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                        # THUẬT TOÁN VẼ TIẾNG VIỆT
+                        img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                        draw = ImageDraw.Draw(img_pil)
+                        try:
+                            font = ImageFont.truetype("arial.ttf", 32)
+                        except IOError:
+                            font = ImageFont.load_default()
+                        draw.text((x_min, y_min - 40), str(display_text), font=font, fill=(0, 255, 0)) 
+                        frame = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                target_w = right_frame.winfo_width() - 60
-                target_h = right_frame.winfo_height() - 150 
-                
+                target_w, target_h = right_frame.winfo_width() - 60, right_frame.winfo_height() - 150 
                 if target_w > 10 and target_h > 10:
                     scale = min(target_w / w, target_h / h)
-                    new_w = int(w * scale)
-                    new_h = int(h * scale)
-                    frame_rgb = cv2.resize(frame_rgb, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                    frame_rgb = cv2.resize(frame_rgb, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LINEAR)
 
                 img = Image.fromarray(frame_rgb)
                 imgtk = ImageTk.PhotoImage(image=img)
@@ -179,8 +221,6 @@ def create_user_menu(root):
             root.after(10, update_frame)
 
     def on_close():
-        if cap:
-            cap.release()
+        if cap: cap.release()
         root.destroy()
-
     root.protocol("WM_DELETE_WINDOW", on_close)
