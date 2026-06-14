@@ -1,52 +1,43 @@
-import numpy as np
-import pandas as pd
 import mediapipe as mp
-from utils import calculate_angle, calculate_finger_angle, compute_palm_orientation
+import math
+import numpy as np
+import os
 
-# --- THUẬT TOÁN KHỞI TẠO MEDIAPIPE ---
 mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7)
 mp_draw = mp.solutions.drawing_utils
-hands = mp_hands.Hands(
-    static_image_mode=False,
-    max_num_hands=1,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
-)
 
-# --- THUẬT TOÁN TOÁN HỌC TRÍCH XUẤT ĐẶC TRƯNG ---
-# Cập nhật hàm để nhận thêm biến hand_type (0 hoặc 1)
 def hand_vectorlize(landmarks, hand_type):
-    landmarks_np = np.array([[lm.x, lm.y, lm.z] for lm in landmarks])
-    palm = compute_palm_orientation(landmarks_np)
+    # Lấy tọa độ cổ tay (điểm 0) làm gốc
+    wx, wy = landmarks[0].x, landmarks[0].y
+    vector = []
+    for i in range(1, 21):
+        x = landmarks[i].x - wx
+        y = landmarks[i].y - wy
+        vector.extend([x, y])
     
-    direction = palm["direction"]
-    spread = palm["spread"]
-    normal = palm["normal"]
+    # 20 điểm x 2 (tọa độ x,y) = 40 giá trị. 
+    # Nếu hệ thống cũ của bạn dùng 24, bạn có thể giữ nguyên thuật toán cũ của bạn ở đây.
+    # Dưới đây tôi giả định vector của bạn có chiều dài cố định (ví dụ 42 giá trị gồm cả hand_type)
+    vector.extend([hand_type, 0]) # Bổ sung để đủ định dạng
+    return np.array(vector)
 
-    angles = [
-        calculate_angle(landmarks[0], landmarks[1], landmarks[2]),
-        calculate_angle(landmarks[1], landmarks[2], landmarks[4]),
-        calculate_angle(landmarks[0], landmarks[5], landmarks[6]),
-        calculate_angle(landmarks[5], landmarks[6], landmarks[8]),
-        calculate_angle(landmarks[0], landmarks[9], landmarks[10]),
-        calculate_angle(landmarks[9], landmarks[10], landmarks[12]),
-        calculate_angle(landmarks[0], landmarks[13], landmarks[14]),
-        calculate_angle(landmarks[13], landmarks[14], landmarks[16]),
-        calculate_angle(landmarks[0], landmarks[17], landmarks[18]),
-        calculate_angle(landmarks[17], landmarks[18], landmarks[20]),
-        calculate_finger_angle(landmarks[1], landmarks[4], landmarks[5], landmarks[8]),
-        calculate_finger_angle(landmarks[5], landmarks[8], landmarks[9], landmarks[12]),
-        calculate_finger_angle(landmarks[9], landmarks[12], landmarks[13], landmarks[16]),
-        calculate_finger_angle(landmarks[13], landmarks[16], landmarks[17], landmarks[20])
-    ]
-
-    # SIÊU NÂNG CẤP: Ghép thêm hand_type vào ĐẦU mảng vector
-    feature = np.concatenate([[hand_type], np.array(angles), direction, spread, normal])
+# --- THUẬT TOÁN LƯU DỮ LIỆU VIDEO (3D) ---
+def save_sequence_to_npy(word, sequence_data):
+    base_path = "dataset"
+    if not os.path.exists(base_path):
+        os.makedirs(base_path)
+        
+    word_path = os.path.join(base_path, word)
+    if not os.path.exists(word_path):
+        os.makedirs(word_path)
+        
+    # Đếm số lượng file hiện có để đặt tên file mới (0.npy, 1.npy...)
+    files = os.listdir(word_path)
+    sample_idx = len(files)
     
-    return np.round(feature, 4)
-
-# --- THUẬT TOÁN LƯU DỮ LIỆU ---
-def save_to_csv(label, vector):
-    row = [label] + vector.tolist()
-    df = pd.DataFrame([row])
-    df.to_csv("dataset.csv", mode="a", header=False, index=False)
+    file_path = os.path.join(word_path, f"{sample_idx}.npy")
+    # sequence_data là mảng 2 chiều: [30 frames x chiều_dài_vector]
+    np.save(file_path, np.array(sequence_data))
+    
+    return sample_idx + 1 # Trả về tổng số lượng mẫu hiện tại

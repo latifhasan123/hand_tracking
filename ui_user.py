@@ -74,26 +74,35 @@ def create_user_menu(root):
                             fg_color="#4CAF50", hover_color="#388E3C", height=45, command=toggle_camera)
     cam_btn.pack(fill="x", padx=30, pady=10)
 
-    # --- TÍNH NĂNG TỪ ĐIỂN TRA CỨU ---
+    # ==========================================
+    # TẠO KHUNG TỪ ĐIỂN NỔI (IN-APP MODAL)
+    # ==========================================
+    # Khung này tạo sẵn nhưng sẽ bị giấu đi (chưa dùng .place)
+    dict_frame = ctk.CTkFrame(root, fg_color="#2B2B2B", border_width=2, border_color="#FF9800", corner_radius=15)
+    
+    try:
+        img = Image.open("vsl_dict.gif") 
+        img = img.resize((600, 450), Image.Resampling.LANCZOS)
+        photo = ImageTk.PhotoImage(img)
+        lbl = ctk.CTkLabel(dict_frame, text="", image=photo)
+        lbl.image = photo 
+        lbl.pack(padx=20, pady=(20, 10))
+    except Exception:
+        err_text = "⚠️ Không tìm thấy ảnh từ điển!\nBạn hãy đảm bảo file ảnh tên là 'vsl_dict.jpg'\nvà nằm cùng thư mục code."
+        ctk.CTkLabel(dict_frame, text=err_text, font=ctk.CTkFont(size=16), text_color="#FF9800").pack(padx=40, pady=40)
+
+    def close_dictionary():
+        dict_frame.place_forget() # Giấu khung từ điển đi
+
+    close_btn = ctk.CTkButton(dict_frame, text="Đóng Từ Điển", font=ctk.CTkFont(weight="bold"),
+                              fg_color="#F44336", hover_color="#D32F2F", command=close_dictionary)
+    close_btn.pack(pady=(0, 20))
+
+    # --- NÚT BẬT TỪ ĐIỂN ---
     def show_dictionary():
-        dict_window = ctk.CTkToplevel(root)
-        dict_window.title("Từ điển Ký hiệu Tiếng Việt")
-        dict_window.geometry("700x550")
-        dict_window.attributes("-topmost", True) # Luôn nổi lên trên
-        
-        try:
-            img = Image.open("vsl_dict.gif")
-            # Thu phóng ảnh cho vừa với cửa sổ popup
-            img = img.resize((660, 500), Image.Resampling.LANCZOS)
-            photo = ImageTk.PhotoImage(img)
-            
-            lbl = ctk.CTkLabel(dict_window, text="", image=photo)
-            lbl.image = photo 
-            lbl.pack(padx=20, pady=20)
-        except Exception:
-            err_text = "⚠️ Không tìm thấy ảnh từ điển!\n\nBạn hãy lưu một tấm ảnh bảng chữ cái,\nđổi tên thành 'vsl_dict.jpg' và để\nvào chung thư mục với file code nhé."
-            err = ctk.CTkLabel(dict_window, text=err_text, font=ctk.CTkFont(size=16), text_color="#FF9800")
-            err.pack(expand=True)
+        # Gọi khung từ điển nổi lên ngay chính giữa ứng dụng
+        dict_frame.place(relx=0.5, rely=0.5, anchor="center")
+        dict_frame.lift() # Ép nó nổi lên trên cùng, đè lên cả camera
 
     dict_btn = ctk.CTkButton(left_frame, text="📖 Từ điển (Cheat Sheet)", font=ctk.CTkFont(size=14, weight="bold"),
                              fg_color="#FF9800", hover_color="#F57C00", height=40, command=show_dictionary)
@@ -169,7 +178,6 @@ def create_user_menu(root):
                             display_text = "..." if raw_text == "UNKNOWN" else raw_text
                             result_label.configure(text=display_text)
                             
-                            # XỬ LÝ LỊCH SỬ VÀ VĂN BẢN (Đã sửa lỗi gõ lặp chữ)
                             if display_text != last_detected:
                                 if display_text != "...":
                                     history_list.append(display_text)
@@ -197,7 +205,6 @@ def create_user_menu(root):
 
                                 last_detected = display_text
 
-                        # THUẬT TOÁN VẼ TIẾNG VIỆT
                         img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                         draw = ImageDraw.Draw(img_pil)
                         try:
