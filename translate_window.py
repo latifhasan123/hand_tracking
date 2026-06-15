@@ -11,14 +11,12 @@ def load_lstm_model():
     return None, None
 
 def predict_sign(model, labels, sequence_data):
-    # Định dạng lại ma trận (1 mẫu, 30 khung hình, 42 tọa độ)
+    # Định dạng lại ma trận (1 mẫu, 30 khung hình, 43 tọa độ)
     res = model.predict(np.expand_dims(sequence_data, axis=0), verbose=0)[0]
     
     max_idx = np.argmax(res)
     confidence = res[max_idx]
-    
-    # Nếu độ tự tin trên 80% thì mới xuất kết quả
-    if confidence > 0.8:
+    if confidence > 0.98:
         return labels[max_idx]
     else:
-        return "..."
+        return "UNKNOWN" # Trả về UNKNOWN nếu không đủ tự tin

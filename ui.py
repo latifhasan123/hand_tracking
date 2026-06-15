@@ -118,6 +118,9 @@ def create_main_menu(root):
     action_labels = None
     test_sequence = [] 
     frame_counter = 0
+    prev_wx = None  # Biến nhớ tọa độ X cũ
+    prev_wy = None  # Biến nhớ tọa độ Y cũ
+    prediction_buffer = []
 
     def toggle_test_mode():
         nonlocal is_testing, lstm_model, action_labels, test_sequence
@@ -154,7 +157,7 @@ def create_main_menu(root):
     video_label.pack(padx=12, pady=12) 
 
     def update_frame():
-        nonlocal is_recording, sequence_data, test_sequence, frame_counter
+        nonlocal is_recording, sequence_data, test_sequence, frame_counter, prev_wx, prev_wy
         if is_camera_on and cap is not None:
             success, frame = cap.read()
             if success:
@@ -163,21 +166,23 @@ def create_main_menu(root):
                 frame = cv2.flip(frame, 1)
                 h, w, c = frame.shape
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                rgb_frame.flags.writeable = False # Khóa ảnh, cấm copy
-                results = hands.process(rgb_frame) # Quét AI
-                rgb_frame.flags.writeable = True  # Mở khóa lại
+                
+                rgb_frame.flags.writeable = False 
+                results = hands.process(rgb_frame) 
+                rgb_frame.flags.writeable = True  
 
                 display_text = word_entry.get().strip()
-                current_vector = np.zeros(42) 
+                current_vector = np.zeros(43) # Vector giờ là 43 con số
 
                 if results.multi_hand_landmarks and results.multi_handedness:
                     for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
                         mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
                         hand_type = 0 if handedness.classification[0].label == "Left" else 1
                         landmarks = hand_landmarks.landmark
-                        current_vector = hand_vectorlize(landmarks, hand_type)
                         
-                        # --- THUẬT TOÁN KÍCH HOẠT "CỬA SỔ TRƯỢT" KHI TEST ---
+                        # Truyền tọa độ cũ vào, và nhận tọa độ mới ra
+                        current_vector, prev_wx, prev_wy = hand_vectorlize(landmarks, hand_type, prev_wx, prev_wy)
+                        
                         if is_testing and lstm_model is not None:
                             test_sequence.append(current_vector)
                             test_sequence = test_sequence[-30:]
@@ -185,11 +190,28 @@ def create_main_menu(root):
                             if len(test_sequence) == 30 and frame_counter % 10 == 0:
                                 predicted_word = predict_sign(lstm_model, action_labels, test_sequence)
                                 
-                                if predicted_word != "...":
-                                    display_text = predicted_word
-                                    result_label.configure(text=f"Dịch: {display_text}")
-
-                        # (ĐÃ XÓA TOÀN BỘ ĐOẠN CODE VẼ TIẾNG VIỆT PIL Ở ĐÂY)
+                                # Đưa kết quả vừa đoán vào bộ nhớ tạm
+                                prediction_buffer.append(predicted_word)
+                                # Chỉ giữ lại đúng 3 kết quả gần nhất
+                                prediction_buffer = prediction_buffer[-3:]
+                                
+                                # === BỘ LỌC ĐỒNG THUẬN ===
+                                # Kiểm tra xem đã đủ 3 kết quả chưa VÀ cả 3 kết quả có giống hệt nhau không
+                                if len(prediction_buffer) == 3 and len(set(prediction_buffer)) == 1:
+                                    final_word = prediction_buffer[0]
+                                    
+                                    if final_word == "IDLE":
+                                        pass # Đứng im thì không hiện gì cả
+                                    elif final_word == "UNKNOWN":
+                                        result_label.configure(text="Dịch: [KHÔNG XÁC ĐỊNH]")
+                                    else:
+                                        result_label.configure(text=f"Dịch: {final_word}")
+                                else:
+                                    # Nếu 3 lần đoán ra 3 kết quả khác nhau -> Đang múa may lung tung -> Rác!
+                                    result_label.configure(text="Dịch: [KHÔNG XÁC ĐỊNH]")
+                else:
+                    # Nếu rút tay ra khỏi camera, phải reset trí nhớ về None
+                    prev_wx, prev_wy = None, None
 
                 # Thu thập dữ liệu quay Video
                 if is_recording:

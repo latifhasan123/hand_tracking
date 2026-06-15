@@ -32,7 +32,7 @@ def train_lstm_model():
     
     # XÂY DỰNG MẠNG NƠ-RON LSTM CỐT LÕI (Gọi thẳng từ keras)
     model = Sequential()
-    model.add(LSTM(64, return_sequences=True, activation='relu', input_shape=(30, 42)))
+    model.add(LSTM(64, return_sequences=True, activation='relu', input_shape=(30, 43)))
     model.add(LSTM(128, return_sequences=True, activation='relu'))
     model.add(LSTM(64, return_sequences=False, activation='relu'))
     model.add(Dense(64, activation='relu'))
