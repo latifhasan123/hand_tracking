@@ -16,7 +16,7 @@ def predict_sign(model, labels, sequence_data):
     
     max_idx = np.argmax(res)
     confidence = res[max_idx]
-    if confidence > 0.98:
+    if confidence > 0.95:
         return labels[max_idx]
     else:
-        return "UNKNOWN" # Trả về UNKNOWN nếu không đủ tự tin
+        return "KHONG_XAC_DINH" # Trả về UNKNOWN nếu không đủ tự tin
