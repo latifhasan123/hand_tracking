@@ -250,14 +250,20 @@ def create_main_menu(root):
                                             action_del()
                                         elif final_word == "CLEAR":
                                             action_clear_all()
+                                        elif final_word == "UNLOCK":
+                                            # CƠ CHẾ NẮM ĐẤM (LY HỢP):
+                                            # Bỏ qua không gõ chữ gì vào văn bản cả
+                                            pass 
                                         else:
-                                            # ĐÃ BỎ TỰ ĐỘNG CÁCH CHỮ (Cộng trực tiếp ký tự mới vào)
+                                            # Nếu là chữ cái bình thường thì mới gõ vào Textbox
                                             sentence += final_word
-                                            textbox_sentence.configure(state="normal")    # MỞ KHÓA
+                                            textbox_sentence.configure(state="normal")
                                             textbox_sentence.delete("1.0", "end")
                                             textbox_sentence.insert("1.0", sentence)
-                                            textbox_sentence.configure(state="disabled")  # KHÓA LẠI
+                                            textbox_sentence.configure(state="disabled")
                                             
+                                        # Chốt khóa phím bằng ký hiệu vừa dịch
+                                        # Nếu là UNLOCK thì last_sign = "UNLOCK"
                                         last_sign = final_word       
                                         result_label.configure(text=f"Dịch: {final_word}")
                                         

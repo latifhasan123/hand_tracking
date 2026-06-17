@@ -1,22 +1,27 @@
+import onnxruntime as ort
 import numpy as np
-from keras.models import load_model
-import os
 
 def load_lstm_model():
-    if os.path.exists('model.h5') and os.path.exists('labels.npy'):
-        # Gọi thẳng load_model từ keras
-        model = load_model('model.h5')
-        labels = np.load('labels.npy')
-        return model, labels
-    return None, None
+    try:
+        # Load danh sách từ khóa (Đảm bảo tên file action_labels khớp với code cũ của bạn)
+        action_labels = np.load("labels.npy") 
+        
+        # Gọi động cơ ONNX chạy bằng CPU siêu mượt
+        session = ort.InferenceSession("model.onnx", providers=['CPUExecutionProvider'])
+        
+        return session, action_labels
+    except Exception as e:
+        print("Lỗi load model:", e)
+        return None, None
 
-def predict_sign(model, labels, sequence_data):
-    # Định dạng lại ma trận (1 mẫu, 30 khung hình, 43 tọa độ)
-    res = model.predict(np.expand_dims(sequence_data, axis=0), verbose=0)[0]
+def predict_sign(session, action_labels, test_sequence):
+    # Định dạng lại chuỗi 30 khung hình cho đúng chuẩn đầu vào của ONNX
+    input_data = np.expand_dims(test_sequence, axis=0).astype(np.float32)
     
-    max_idx = np.argmax(res)
-    confidence = res[max_idx]
-    if confidence > 0.95:
-        return labels[max_idx]
-    else:
-        return "KHONG_XAC_DINH" # Trả về UNKNOWN nếu không đủ tự tin
+    # Dự đoán thời gian thực
+    input_name = session.get_inputs()[0].name
+    result = session.run(None, {input_name: input_data})[0]
+    
+    # Lấy ra từ khóa có tỷ lệ chính xác cao nhất
+    predicted_word = action_labels[np.argmax(result)]
+    return predicted_word
