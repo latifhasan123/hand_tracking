@@ -45,9 +45,12 @@ def train_lstm_model():
     model.add(Dropout(0.2)) # Vũ khí 1
     
     model.add(Dense(64, activation='relu'))
-    model.add(Dense(actions.shape[0], activation='softmax')) 
+    # Đổi softmax thành sigmoid
+    model.add(Dense(actions.shape[0], activation='sigmoid')) 
     
-    model.compile(optimizer='Adam', loss='categorical_crossentropy', metrics=['categorical_accuracy'])
+    # Đổi loss function cho phù hợp với sigmoid
+    model.compile(optimizer='Adam', loss='binary_crossentropy', metrics=['categorical_accuracy'])
+    
     if not os.path.exists('model'):
         os.makedirs('model')
     # 3. KÍCH HOẠT VŨ KHÍ BẢO VỆ
