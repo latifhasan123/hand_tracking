@@ -267,7 +267,7 @@ def create_main_menu(root):
                             test_sequence.append(current_vector)
                             test_sequence = test_sequence[-30:]
                             if len(test_sequence) == 30 and frame_counter % 10 == 0:
-                                predicted_word = predict_sign(lstm_model, action_labels, test_sequence)
+                                predicted_word, prob = predict_sign(lstm_model, action_labels, test_sequence)
                                 prediction_buffer.append(predicted_word)
                                 prediction_buffer = prediction_buffer[-3:]
                                 valid_predictions = [p for p in prediction_buffer if p != "KHONG_XAC_DINH"]
