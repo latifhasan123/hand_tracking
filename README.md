@@ -1,61 +1,81 @@
-# Hand Sign Translator
+# VSL Translate - Folder con `user/goc_hoc_tap`
 
-Realtime hand sign translator using MediaPipe and Deep Learning. This project uses MediaPipe Hand Tracking to detect 21 hand landmarks from webcam input, extracts feature vectors across a sequence of 30 frames, and uses an LSTM neural network model to recognize and translate dynamic hand signs in realtime. The application includes an Admin Dashboard for collecting custom hand sign video sequences, a model training system using TensorFlow/Keras, and a realtime translation window with virtual keyboard typing features using OpenCV and CustomTkinter GUI integration.
+Folder này tạo giao diện **Góc học tập** bằng Python + CustomTkinter, thiết kế theo giao diện hiện tại của dự án `hand_tracking`.
 
-## Installation
+## 1. Cách đặt folder vào project
 
-Clone repository:
+Sau khi clone project:
 
-```bash
+```powershell
 git clone https://github.com/latifhasan123/hand_tracking.git
-```
-
-Open project folder
-```bash
 cd hand_tracking
 ```
 
-Create virtual enviroment
-```bash
+Giải nén file zip này vào **thư mục gốc `hand_tracking`** để có cấu trúc:
+
+```text
+hand_tracking/
+├── user/
+│   ├── main_user.py
+│   ├── ui_user.py
+│   └── goc_hoc_tap/
+│       ├── main_study.py
+│       ├── study_ui.py
+│       ├── data.py
+│       ├── theme.py
+│       ├── install_into_ui_user.py
+│       └── run_study.bat
+```
+
+## 2. Cài thư viện cần thiết
+
+Dự án gốc đã dùng CustomTkinter. Nếu máy chưa có, chạy:
+
+```powershell
+pip install customtkinter pillow opencv-python numpy
+```
+
+Nếu bạn đã tạo môi trường ảo:
+
+```powershell
 python -m venv venv
-venv\Scripts\activate
-```
-Install dependencies
-```bash
+.\venv\Scripts\activate
 pip install -r requirements.txt
+pip install customtkinter pillow
 ```
 
-Run project
-```bash
-python main.py
+## 3. Chạy riêng giao diện Góc học tập
+
+Từ thư mục gốc `hand_tracking`:
+
+```powershell
+python user\goc_hoc_tap\main_study.py
 ```
 
-Workflow
-Enter a word label and click "Lưu mẫu" (Save Sample) to collect 30-frame video sequences for each hand sign.
-Click "Train Model" to train and generate the deep learning model.
-Click "Bật Test (Translate)" to start realtime hand sign translation and typing.
+Hoặc mở trực tiếp:
 
-The project automatically creates:
+```powershell
+user\goc_hoc_tap\run_study.bat
+```
 
-dataset/ directory → stores .npy training sequence vectors
-model.h5 → trained LSTM deep learning model
+## 4. Nhúng vào nút "Góc học tập" của `user/ui_user.py`
 
-Technologies
-Python
-OpenCV
-MediaPipe
-NumPy
-TensorFlow / Keras
-CustomTkinter
-Pillow
+Chạy lệnh:
 
-Notes
-Webcam required
-Better lighting improves detection accuracy
-More training samples improve prediction quality
-Supports custom dynamic hand sign training (including SPACE, DEL, CLEAR commands)
-Remember to collect a "KHONG_XAC_DINH" (Idle/Noise) class to prevent false predictions
-Webcam required
-Better lighting improves detection accuracy
-More training samples improve prediction quality
-Supports custom hand sign training
+```powershell
+python user\goc_hoc_tap\install_into_ui_user.py
+```
+
+Sau đó chạy app gốc:
+
+```powershell
+python user\main_user.py
+```
+
+Khi bấm nút **Góc học tập**, app sẽ mở cửa sổ giao diện học tập.
+
+## 5. Ghi chú
+
+- Đây là giao diện học tập tĩnh/giả lập để làm UI.
+- Phần camera thật vẫn nằm trong `user/ui_user.py` của project gốc.
+- Có thể kết nối màn hình `Luyện bằng camera` với OpenCV/AI sau bằng cách gọi lại logic camera trong `ui_user.py`.
