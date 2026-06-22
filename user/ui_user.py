@@ -67,8 +67,8 @@ def create_user_menu(root):
     # ==========================================
     # Giảm độ phân giải đầu vào giúp MediaPipe + AI xử lý nhanh hơn.
     # Nếu máy mạnh, bạn có thể đổi lại 640 x 480.
-    CAMERA_WIDTH = 480
-    CAMERA_HEIGHT = 360
+    CAMERA_WIDTH = 640
+    CAMERA_HEIGHT = 480
     CAMERA_FPS = 30
 
     # AI_INTERVAL càng lớn thì khung hình càng mượt, nhưng kết quả nhận diện cập nhật chậm hơn.
@@ -76,8 +76,8 @@ def create_user_menu(root):
     AI_INTERVAL = 8
 
     # Giới hạn kích thước ảnh hiển thị để giảm tải resize khi giao diện quá lớn.
-    DISPLAY_MAX_WIDTH = 760
-    DISPLAY_MAX_HEIGHT = 520
+    DISPLAY_MAX_WIDTH = 900
+    DISPLAY_MAX_HEIGHT = 650
 
     # ==========================================
     # GIAO DIỆN DỊCH TỰ DO HIỆN ĐẠI
@@ -106,7 +106,7 @@ def create_user_menu(root):
     # ==========================================
     # CỘT 1: SIDEBAR BÊN TRÁI
     # ==========================================
-    sidebar = ctk.CTkFrame(root, width=285, fg_color=COLORS["sidebar"], corner_radius=0)
+    sidebar = ctk.CTkFrame(root, width=280, fg_color=COLORS["sidebar"], corner_radius=0)
     sidebar.pack_propagate(False)
     sidebar.pack(side="left", fill="y")
 
@@ -133,10 +133,6 @@ def create_user_menu(root):
         font=ctk.CTkFont(size=12),
         text_color=COLORS["muted"]
     ).pack(anchor="w")
-
-    def dummy_action(mode_name):
-        messagebox.showinfo("Tính năng đang phát triển", f"Tính năng '{mode_name}' sẽ sớm ra mắt!")
-
     def nav_button(text, active=False, command=None):
         return ctk.CTkButton(
             sidebar,
@@ -151,7 +147,7 @@ def create_user_menu(root):
             command=command if command is not None else (lambda: None)
         )
 
-    translate_nav_btn = nav_button("🎙️  Dịch tự do (1 & 2 Tay)", active=True, command=lambda: show_translate_panel())
+    translate_nav_btn = nav_button("🎙️  Dịch tự do", active=True, command=lambda: show_translate_panel())
     translate_nav_btn.pack(fill="x", padx=15, pady=5)
 
     study_nav_btn = nav_button("📚  Góc học tập", command=lambda: show_study_panel())
@@ -160,20 +156,7 @@ def create_user_menu(root):
     minigame_nav_btn = nav_button("🎮  Minigame", command=lambda: show_minigame_panel())
     minigame_nav_btn.pack(fill="x", padx=15, pady=5)
 
-    ctk.CTkFrame(sidebar, height=1, fg_color=COLORS["border"]).pack(fill="x", padx=20, pady=18)
-
-    ctk.CTkButton(
-        sidebar,
-        text="📖  Từ điển (Cheat Sheet)",
-        font=ctk.CTkFont(size=14, weight="bold"),
-        fg_color=COLORS["orange"],
-        hover_color="#E99A00",
-        text_color="#111827",
-        height=44,
-        corner_radius=14,
-        command=lambda: dummy_action("Từ điển")
-    ).pack(fill="x", padx=15, pady=5)
-
+    
     sidebar_tip = ctk.CTkFrame(sidebar, fg_color=COLORS["sidebar_card"], corner_radius=18)
     sidebar_tip.pack(fill="x", padx=15, pady=(22, 10))
 
@@ -217,7 +200,7 @@ def create_user_menu(root):
     # ==========================================
     # CỘT 3: BẢNG KẾT QUẢ BÊN PHẢI
     # ==========================================
-    right_panel = ctk.CTkFrame(translate_panel, width=350, fg_color=COLORS["bg"], corner_radius=0)
+    right_panel = ctk.CTkFrame(translate_panel, width=280, fg_color=COLORS["bg"], corner_radius=0)
     right_panel.pack_propagate(False)
     right_panel.pack(side="right", fill="y", padx=(0, 20), pady=20)
 
@@ -258,7 +241,7 @@ def create_user_menu(root):
 
     progress_bar = ctk.CTkProgressBar(
         result_card,
-        width=250,
+        width=220,
         height=12,
         corner_radius=10,
         progress_color=COLORS["blue"],
@@ -268,9 +251,8 @@ def create_user_menu(root):
     progress_bar.pack(pady=(0, 18))
 
     mode_rows = [
-        ("Chế độ", "1 & 2 tay", COLORS["blue2"]),
         ("AI", "Đang sẵn sàng", COLORS["green"]),
-        ("Ngưỡng xác nhận", "80%", COLORS["orange"]),
+        ("Ngưỡng xác nhận", "80%", COLORS["green"]),
     ]
 
     for label, value, color in mode_rows:
@@ -416,16 +398,6 @@ def create_user_menu(root):
         text_color=COLORS["muted"]
     ).pack(anchor="w", pady=(2, 0))
 
-    mode_box = ctk.CTkFrame(header, fg_color=COLORS["card"], corner_radius=18)
-    mode_box.pack(side="right", padx=(20, 0))
-
-    ctk.CTkLabel(
-        mode_box,
-        text="🖐️  Chế độ: 1 & 2 tay",
-        font=ctk.CTkFont(size=15, weight="bold"),
-        text_color=COLORS["blue2"]
-    ).pack(padx=18, pady=13)
-
     camera_card = ctk.CTkFrame(
         middle_panel,
         fg_color=COLORS["card"],
@@ -506,7 +478,8 @@ def create_user_menu(root):
         else:
             is_camera_on = False
             if cap: cap.release()
-            video_label.configure(image=None, text="🖐️\n\nNhấn Bật Camera để bắt đầu dịch")
+            video_label.configure(image="", text="🖐️\n\nNhấn Bật Camera để bắt đầu dịch")
+            video_label.image = None
             history_frame.pack_forget()
             cam_btn.configure(text="▶  Bật Camera", fg_color=COLORS["green"], hover_color="#24B874", text_color="#08111F")
             radar_label.configure(text="🔴 Đang tắt camera", text_color=COLORS["muted"])
@@ -557,11 +530,13 @@ def create_user_menu(root):
             child.pack_forget()
         translate_panel.pack(fill="both", expand=True)
         set_active_nav("translate")
+        cam_btn.pack(side="bottom", fill="x", padx=15, pady=20)
 
     def show_study_panel():
         stop_camera_before_switch()
         clear_embedded_panels()
         translate_panel.pack_forget()
+        cam_btn.pack_forget()
 
         panel = ctk.CTkFrame(content_container, fg_color=COLORS["bg"], corner_radius=0)
         panel.pack(fill="both", expand=True)
@@ -583,6 +558,7 @@ def create_user_menu(root):
         stop_camera_before_switch()
         clear_embedded_panels()
         translate_panel.pack_forget()
+        cam_btn.pack_forget()
 
         panel = ctk.CTkFrame(content_container, fg_color=COLORS["bg"], corner_radius=0)
         panel.pack(fill="both", expand=True)
@@ -625,9 +601,9 @@ def create_user_menu(root):
 
                 # Cập nhật Radar
                 if hands_detected == 1:
-                    radar_label.configure(text="🟢 Đang nhận diện: 1 Tay (Chế độ Phím/Dấu)", text_color="#4CAF50")
+                    radar_label.configure(text="🟢 Đang nhận diện: 1 Tay", text_color="#4CAF50")
                 elif hands_detected == 2:
-                    radar_label.configure(text="🔵 Đang nhận diện: 2 Tay (Chế độ Từ vựng)", text_color="#2196F3")
+                    radar_label.configure(text="🔵 Đang nhận diện: 2 Tay", text_color="#2196F3")
                 else:
                     radar_label.configure(text="🔴 Không thấy tay", text_color="#F44336")
 
