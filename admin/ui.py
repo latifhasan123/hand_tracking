@@ -8,18 +8,15 @@ import threading
 
 from core.translate_window import load_lstm_model, predict_sign
 
-# ==========================================
-# ĐỔI CÁP: IMPORT CẢ 2 BỘ ĐỒ NGHỀ CÙNG LÚC
-# ==========================================
-# Đồ nghề 1 Tay (Đặt bí danh thêm _1)
+# Đồ nghề 1 Tay
 from core.train_window import hand_vectorlize as hand_vectorlize_1, save_sequence_to_npy as save_sequence_1, hands as hands_1, mp_draw, mp_hands
-# Đồ nghề 2 Tay (Đặt bí danh thêm _2)
+# Đồ nghề 2 Tay
 from core.train_window_both import extract_86_features, save_sequence_to_npy as save_sequence_2, hands as hands_2
 
 def create_main_menu(root):
     root.title("Hand Sign Translator - Admin Dashboard (Pro Edition)")
     window_width = 1100
-    window_height = 750 # Tăng nhẹ chiều cao để chứa công tắc
+    window_height = 800 # Nới rộng thêm một chút để chứa thanh tiến độ
     screen_width, screen_height = root.winfo_screenwidth(), root.winfo_screenheight()
     root.geometry(f"{window_width}x{window_height}+{int((screen_width/2)-(window_width/2))}+{int((screen_height/2)-(window_height/2))}")
 
@@ -38,7 +35,6 @@ def create_main_menu(root):
     test_sequence = [] 
     frame_counter = 0
     
-    # 4 BIẾN LƯU TỌA ĐỘ CHO CẢ 2 TAY
     prev_wx_l, prev_wy_l = None, None  
     prev_wx_r, prev_wy_r = None, None  
     
@@ -56,7 +52,6 @@ def create_main_menu(root):
     title = ctk.CTkLabel(left_frame, text="BẢNG ĐIỀU KHIỂN", font=ctk.CTkFont(size=24, weight="bold"))
     title.pack(pady=(20, 15))
 
-    # --- CÔNG TẮC CHUYỂN CHẾ ĐỘ ĐỈNH CAO ---
     mode_var = ctk.StringVar(value="1 Tay (43 số)")
     mode_selector = ctk.CTkSegmentedButton(left_frame, values=["1 Tay (43 số)", "2 Tay (86 số)"], variable=mode_var, font=ctk.CTkFont(weight="bold"))
     mode_selector.pack(fill="x", padx=30, pady=(0, 15))
@@ -64,7 +59,9 @@ def create_main_menu(root):
     def toggle_camera():
         nonlocal cap, is_camera_on
         if not is_camera_on:
-            cap = cv2.VideoCapture(0)
+            # Sửa lỗi Lag Camera bằng DirectShow
+            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            cap.set(cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -94,10 +91,8 @@ def create_main_menu(root):
 
     def check_word(*args):
         word = word_entry.get().strip()
-        # Thay đổi thư mục hiển thị lượng mẫu dựa trên công tắc
         target_dir = "dataset" if mode_var.get() == "1 Tay (43 số)" else "dataset_both"
         path = os.path.join(target_dir, word)
-        
         if os.path.exists(path):
             status_label.configure(text=f"Đã lưu: {len(os.listdir(path))} mẫu")
         else:
@@ -110,7 +105,6 @@ def create_main_menu(root):
         word = word_entry.get().strip()
         if not is_camera_on: return messagebox.showwarning("Lỗi", "Hãy bật camera!")
         if word == "": return messagebox.showwarning("Lỗi", "Hãy nhập từ khóa!")
-        
         is_recording = True
         sequence_data = []
         camera_border.configure(border_color="#F44336") 
@@ -119,26 +113,47 @@ def create_main_menu(root):
                   text_color=("gray10", "#DCE4EE"), command=start_recording).pack(fill="x", padx=30, pady=5)
     ctk.CTkFrame(left_frame, height=2, fg_color="gray50").pack(fill="x", padx=20, pady=5)
 
-    # --- 2. HUẤN LUYỆN ---
+    # --- 2. HUẤN LUYỆN (CÓ THANH TIẾN ĐỘ) ---
     ctk.CTkLabel(left_frame, text="2. Huấn luyện Deep Learning", font=ctk.CTkFont(size=15, weight="bold")).pack(anchor="w", padx=30, pady=(5, 5))
     
+    # 🌟 KHU VỰC CHỨA UI TIẾN ĐỘ AI (Ẩn đi lúc đầu)
+    progress_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+    train_status_label = ctk.CTkLabel(progress_frame, text="Đang nạp dữ liệu...", font=ctk.CTkFont(weight="bold"), text_color="#FF9800")
+    train_status_label.pack()
+    train_progress_bar = ctk.CTkProgressBar(progress_frame, width=280, height=12)
+    train_progress_bar.set(0)
+    train_progress_bar.pack(pady=5)
+    train_acc_label = ctk.CTkLabel(progress_frame, text="Độ chính xác: 0%", text_color="#4CAF50", font=ctk.CTkFont(size=12))
+    train_acc_label.pack()
+
     def run_train_model():
         mode = mode_var.get()
-        train_btn.configure(state="disabled", text="Đang Train (Xem Terminal)...")
+        train_btn.configure(state="disabled", text="Đang Huấn Luyện...")
+        progress_frame.pack(fill="x", padx=30, pady=5) # Hiện thanh tiến độ lên
+        train_progress_bar.set(0)
+        
+        # Hàm hứng dữ liệu từ Backend đẩy lên UI
+        def update_ui(epoch, acc, val_acc):
+            # Dùng root.after để chống Crash Thread của Tkinter
+            root.after(0, lambda: train_status_label.configure(text=f"AI đang học: Vòng {epoch}/150"))
+            root.after(0, lambda: train_acc_label.configure(text=f"Thuộc bài: {acc:.1f}%  |  Thi thực tế: {val_acc:.1f}%"))
+            root.after(0, lambda: train_progress_bar.set(epoch / 150.0))
+
         def train_thread():
             try:
                 if mode == "1 Tay (43 số)":
                     from core.train_model import train_lstm_model 
-                    train_lstm_model()
-                    messagebox.showinfo("Thành công", "Đã huấn luyện xong mô hình 1 tay (model.onnx)!")
+                    train_lstm_model(ui_callback=update_ui) # Ném hàm cập nhật vào backend
+                    root.after(0, lambda: messagebox.showinfo("Thành công", "Đã huấn luyện xong mô hình 1 tay!"))
                 else:
                     from core.train_model_both import train_lstm_model 
-                    train_lstm_model()
-                    messagebox.showinfo("Thành công", "Đã huấn luyện xong mô hình 2 tay (model_both.onnx)!")
+                    train_lstm_model(ui_callback=update_ui)
+                    root.after(0, lambda: messagebox.showinfo("Thành công", "Đã huấn luyện xong mô hình 2 tay!"))
             except Exception as e:
-                messagebox.showerror("Lỗi", f"Quá trình Train thất bại: {str(e)}")
+                root.after(0, lambda: messagebox.showerror("Lỗi", f"Quá trình Train thất bại: {str(e)}"))
             finally:
-                train_btn.configure(state="normal", text="Train Model")
+                root.after(0, lambda: train_btn.configure(state="normal", text="Train Model"))
+                
         threading.Thread(target=train_thread, daemon=True).start()
 
     train_btn = ctk.CTkButton(left_frame, text="Train Model", font=ctk.CTkFont(weight="bold"), fg_color="#2196F3", command=run_train_model)
@@ -154,7 +169,6 @@ def create_main_menu(root):
         nonlocal is_testing, lstm_model, action_labels, test_sequence
         if not is_camera_on: return messagebox.showwarning("Lỗi", "Hãy bật camera!")
         
-        # Khóa Test 2 Tay ở Admin để tránh xung đột
         if mode_var.get() == "2 Tay (86 số)":
             messagebox.showwarning("Khóa chức năng", "Chế độ Test ở bảng Admin hiện chỉ chạy cho 1 Tay. Vui lòng chuyển sang giao diện User để test dịch 2 tay chuyên nghiệp!")
             return
@@ -187,9 +201,6 @@ def create_main_menu(root):
     textbox_sentence.pack(fill="both", expand=True, padx=4, pady=4) 
     textbox_sentence.configure(state="disabled")
 
-    # ==========================================
-    # CÁC HÀM XỬ LÝ CỬ CHỈ ĐẶC BIỆT
-    # ==========================================
     def action_space():
         nonlocal sentence, last_sign
         sentence += " "  
@@ -218,7 +229,7 @@ def create_main_menu(root):
         textbox_sentence.configure(state="disabled")
 
     # ==========================================
-    # KHU VỰC CAMERA BÊN PHẢI (TRÁI TIM CỦA CÔNG TẮC)
+    # KHU VỰC CAMERA BÊN PHẢI
     # ==========================================
     right_frame = ctk.CTkFrame(root, fg_color="black", corner_radius=0)
     right_frame.pack(side="right", fill="both", expand=True)
@@ -231,7 +242,6 @@ def create_main_menu(root):
         nonlocal prev_wx_l, prev_wy_l, prev_wx_r, prev_wy_r, prediction_buffer, sentence, last_sign
         
         mode = mode_var.get()
-        # Chuyển đổi bộ não đếm tay dựa theo công tắc
         current_hands = hands_1 if mode == "1 Tay (43 số)" else hands_2
 
         if is_camera_on and cap is not None:
@@ -252,17 +262,12 @@ def create_main_menu(root):
                     for hand_landmarks in results.multi_hand_landmarks:
                         mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
                         
-                    # ==========================================
-                    # NGÃ BA ĐƯỜNG: XỬ LÝ THEO CHẾ ĐỘ
-                    # ==========================================
                     if mode == "1 Tay (43 số)":
-                        # Chỉ lấy tay đầu tiên camera thấy
                         handedness = results.multi_handedness[0]
                         hand_landmarks = results.multi_hand_landmarks[0]
                         hand_type = 0 if handedness.classification[0].label == "Left" else 1
                         current_vector, prev_wx_l, prev_wy_l = hand_vectorlize_1(hand_landmarks.landmark, hand_type, prev_wx_l, prev_wy_l)
                         
-                        # Chỉ test khi đang ở mode 1 tay
                         if is_testing and lstm_model is not None:
                             test_sequence.append(current_vector)
                             test_sequence = test_sequence[-30:]
@@ -287,7 +292,6 @@ def create_main_menu(root):
                                         last_sign = final_word       
                                         result_label.configure(text=f"Dịch: {final_word}")
                     else:
-                        # CHẾ ĐỘ 2 TAY (86 Số)
                         current_vector, prev_wx_l, prev_wy_l, prev_wx_r, prev_wy_r = extract_86_features(
                             results, prev_wx_l, prev_wy_l, prev_wx_r, prev_wy_r
                         )
@@ -298,9 +302,6 @@ def create_main_menu(root):
                     test_sequence.clear() 
                     last_sign = None
 
-                # ==========================================
-                # LƯU FILE THEO CHẾ ĐỘ
-                # ==========================================
                 if is_recording and current_vector is not None:
                     sequence_data.append(current_vector)
                     cv2.putText(frame, f"DANG QUAY... {len(sequence_data)}/{SEQUENCE_LENGTH}", 
@@ -308,7 +309,6 @@ def create_main_menu(root):
                     
                     if len(sequence_data) == SEQUENCE_LENGTH:
                         word = word_entry.get().strip()
-                        # Chọn hàm lưu file tương ứng
                         save_fn = save_sequence_1 if mode == "1 Tay (43 số)" else save_sequence_2
                         count = save_fn(word, sequence_data)
                         
@@ -328,7 +328,8 @@ def create_main_menu(root):
                 video_label.configure(image=imgtk)
                 video_label.image = imgtk
 
-            root.after(1, update_frame)
+            delay_time = 1 if is_recording else 15
+            root.after(delay_time, update_frame)
 
     def on_close():
         if cap: cap.release()

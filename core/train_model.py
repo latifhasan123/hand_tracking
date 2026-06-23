@@ -5,10 +5,11 @@ from keras.utils import to_categorical
 from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
 from keras.callbacks import ModelCheckpoint, EarlyStopping
+from keras.callbacks import Callback
 import tensorflow as tf
 import tf2onnx
 
-def train_lstm_model():
+def train_lstm_model(ui_callback=None):
     DATA_PATH = "dataset"
     
     # 1. ĐỌC DỮ LIỆU
@@ -59,11 +60,16 @@ def train_lstm_model():
     
     # Vũ khí 3 (Người canh lò): Nếu sau 20 vòng mà điểm không tăng, tự động ngắt và lấy lại bộ não xịn nhất
     early_stopping = EarlyStopping(monitor='val_categorical_accuracy', patience=20, restore_best_weights=True, verbose=1)
-    
+    class UICallback(Callback):
+        def on_epoch_end(self, epoch, logs=None):
+            if ui_callback:
+                acc = logs.get('categorical_accuracy', 0) * 100
+                val_acc = logs.get('val_categorical_accuracy', 0) * 100
+                ui_callback(epoch + 1, acc, val_acc)
     # 4. BẮT ĐẦU HUẤN LUYỆN
     print("Bắt đầu huấn luyện với hệ thống chống học vẹt...")
     # Lưu ý: Cho AI học 150 vòng, lấy X_test ra làm bài kiểm tra chéo (validation_data)
-    model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=150, batch_size=16, callbacks=[checkpoint, early_stopping]) 
+    model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=150, batch_size=16, callbacks=[checkpoint, early_stopping, UICallback()])
     
     np.save('model/labels.npy', actions) 
     

@@ -175,8 +175,20 @@ def create_user_menu(root):
         justify="left"
     ).pack(anchor="w", padx=14, pady=(0, 14))
 
+    # ==========================================
+    # KHUNG CHỨA CÁC NÚT Ở ĐÁY SIDEBAR
+    # ==========================================
+    bottom_sidebar = ctk.CTkFrame(sidebar, fg_color="transparent")
+    bottom_sidebar.pack(side="bottom", fill="x", pady=20)
+
+    try:
+        import auth_ui
+    except ImportError:
+        pass
+
+    # 1. NÚT BẬT CAMERA (Tạo và pack đầu tiên để nó nằm trên cùng)
     cam_btn = ctk.CTkButton(
-        sidebar,
+        bottom_sidebar,
         text="▶  Bật Camera",
         font=ctk.CTkFont(size=16, weight="bold"),
         fg_color=COLORS["green"],
@@ -185,8 +197,48 @@ def create_user_menu(root):
         height=48,
         corner_radius=16
     )
-    cam_btn.pack(side="bottom", fill="x", padx=15, pady=20)
+    # Khoảng cách phía dưới (pady=15) để đẩy nút đăng nhập xuống một chút
+    cam_btn.pack(side="top", fill="x", padx=15, pady=(0, 15))
 
+    # 2. NÚT ĐĂNG NHẬP (Nằm ngay dưới Camera)
+    account_btn = ctk.CTkButton(
+        bottom_sidebar,
+        text="👤  Đăng nhập / Đăng ký",
+        height=48,
+        corner_radius=14,
+        anchor="w",
+        font=ctk.CTkFont(size=15, weight="bold"),
+        fg_color=COLORS["card2"],
+        hover_color="#2A323B",
+        text_color="white",
+        command=lambda: show_auth_panel()
+    )
+    account_btn.pack(side="top", fill="x", padx=15)
+
+    # 3. NÚT ĐĂNG XUẤT (Nằm dưới cùng, mặc định ẩn)
+    def perform_logout():
+        if messagebox.askyesno("Đăng xuất", "Bạn có chắc chắn muốn đăng xuất khỏi tài khoản này?"):
+            if 'auth_ui' in sys.modules:
+                auth_ui.CURRENT_USER = None
+                auth_ui.LEARNED_LETTERS = []
+            
+            # Trả lại trạng thái mặc định
+            account_btn.configure(text="👤  Đăng nhập / Đăng ký", fg_color=COLORS["card2"], text_color="white")
+            logout_btn.pack_forget()
+            show_study_panel()       
+
+    logout_btn = ctk.CTkButton(
+        bottom_sidebar,
+        text="🚪  Đăng xuất",
+        height=44,
+        corner_radius=14,
+        anchor="w",
+        font=ctk.CTkFont(size=14, weight="bold"),
+        fg_color="#451A1F",
+        hover_color="#5C2329",
+        text_color="white",
+        command=perform_logout
+    )
     # ==========================================
     # KHUNG NỘI DUNG CHÍNH: các mục Dịch tự do / Góc học tập / Minigame
     # sẽ được đổi ngay trong khung này, không mở cửa sổ mới.
@@ -530,7 +582,9 @@ def create_user_menu(root):
             child.pack_forget()
         translate_panel.pack(fill="both", expand=True)
         set_active_nav("translate")
-        cam_btn.pack(side="bottom", fill="x", padx=15, pady=20)
+        
+        # Đã sửa lại khoảng cách (pady) để nó bung ra đúng vị trí trên nút đăng nhập
+        cam_btn.pack(before=account_btn, side="top", fill="x", padx=15, pady=(0, 15))
 
     def show_study_panel():
         stop_camera_before_switch()
@@ -575,7 +629,45 @@ def create_user_menu(root):
             MinigameFrame(panel, on_back=show_translate_panel, show_sidebar=False).pack(fill="both", expand=True)
 
         set_active_nav("minigame")
+    def show_auth_panel():
+        stop_camera_before_switch()
+        clear_embedded_panels()
+        translate_panel.pack_forget()
+        cam_btn.pack_forget()
 
+        # Bỏ Active (làm mờ) tất cả các nút điều hướng bên trái
+        translate_nav_btn.configure(fg_color="transparent", font=ctk.CTkFont(size=15, weight="normal"))
+        study_nav_btn.configure(fg_color="transparent", font=ctk.CTkFont(size=15, weight="normal"))
+        minigame_nav_btn.configure(fg_color="transparent", font=ctk.CTkFont(size=15, weight="normal"))
+
+        try:
+            import auth_ui
+            
+            # Nếu đã đăng nhập rồi thì không cho vô màn hình đăng nhập nữa
+            if auth_ui.CURRENT_USER is not None:
+                messagebox.showinfo("Tài khoản", f"Bạn đang đăng nhập với tài khoản: {auth_ui.CURRENT_USER['username']}")
+                show_study_panel()
+                return
+
+            def on_login_success():
+                # Cập nhật chữ, đổi nền sang xanh rêu và giữ chữ trắng
+                account_btn.configure(
+                    text=f"🟢  Chào, {auth_ui.CURRENT_USER['username']}", 
+                    fg_color="#17351F", 
+                    text_color="white"
+                )
+                
+                # Hiện nút đăng xuất với khoảng cách (pady) đều hơn
+                logout_btn.pack(after=account_btn, side="top", fill="x", padx=15, pady=(8, 0))
+                
+                show_study_panel()
+
+            # Triệu hồi AuthFrame và thả vào khung nội dung chính
+            auth_frame = auth_ui.AuthFrame(content_container, on_success=on_login_success)
+            auth_frame.pack(fill="both", expand=True)
+
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể tải giao diện đăng nhập: {e}")
     def update_frame():
         nonlocal last_detected, history_list, current_sentence, frame_counter, prev_time
         nonlocal test_sequence_1, test_sequence_2, prev_wx_l, prev_wy_l, prev_wx_r, prev_wy_r

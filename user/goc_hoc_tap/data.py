@@ -1,10 +1,25 @@
 """Static demo data for the VSL Góc học tập UI."""
 
 TOP_MODULES = [
-    {"title": "Bảng chữ cái", "desc": "Học bảng chữ cái\nngôn ngữ ký hiệu", "icon": "A", "color": "blue"},
-    {"title": "Từ vựng", "desc": "Học từ mới theo\nchủ đề", "icon": "📖", "color": "green"},
-    {"title": "Câu giao tiếp", "desc": "Giao tiếp hằng ngày\nbằng ký hiệu", "icon": "💬", "color": "purple"},
-    {"title": "Ôn tập", "desc": "Luyện tập và củng cố\nkiến thức", "icon": "⟳", "color": "orange"},
+    {
+        "title": "Bảng chữ cái",
+        "icon": "A",
+        "desc": "Học bảng chữ cái\nngôn ngữ ký hiệu",
+        "color": "blue"
+    },
+    # XÓA CỤC TỪ VỰNG ĐI, CHỈ GIỮ LẠI CỤC NÀY VÀ ĐỔI TÊN
+    {
+        "title": "Từ vựng & Giao tiếp",
+        "icon": "💬",
+        "desc": "Từ vựng và các câu\ngiao tiếp hằng ngày",
+        "color": "purple"
+    },
+    {
+        "title": "Ôn tập",
+        "icon": "⟳",
+        "desc": "Luyện tập và củng cố\nkiến thức",
+        "color": "orange"
+    }
 ]
 
 TODAY_LESSONS = [
@@ -57,12 +72,60 @@ VOCAB_TOPICS = [
 ]
 
 CONVERSATION_TOPICS = [
-    {"title": "Chào hỏi", "icon": "👋", "desc": "Các câu chào hỏi thông dụng", "done": 8, "total": 12, "color": "green"},
-    {"title": "Tự giới thiệu", "icon": "🧑", "desc": "Giới thiệu bản thân, sở thích", "done": 6, "total": 12, "color": "purple"},
-    {"title": "Hỏi đường", "icon": "🪧", "desc": "Hỏi đường và chỉ dẫn", "done": 7, "total": 12, "color": "blue"},
-    {"title": "Mua sắm", "icon": "🛒", "desc": "Hỏi giá và thanh toán", "done": 5, "total": 12, "color": "orange"},
-    {"title": "Trường học", "icon": "🏫", "desc": "Câu dùng trong lớp học", "done": 6, "total": 12, "color": "purple"},
-    {"title": "Cảm xúc", "icon": "🙂", "desc": "Diễn tả cảm xúc hằng ngày", "done": 7, "total": 12, "color": "pink"},
+    {
+        "title": "Chào hỏi",
+        "icon": "🤝",
+        "desc": "Xin chào, cảm ơn, tôi, tên...",
+        "color": "green",
+        "done": 0,
+        "total": 6,
+        "first_label": "XIN CHÀO"
+    },
+    {
+        "title": "Gia đình",
+        "icon": "👨‍👩‍👧",
+        "desc": "Bố, mẹ",
+        "color": "orange",
+        "done": 0,
+        "total": 2,
+        "first_label": "BỐ"
+    },
+    {
+        "title": "Trường học",
+        "icon": "🏫",
+        "desc": "Giáo viên, học sinh",
+        "color": "purple",
+        "done": 0,
+        "total": 2,
+        "first_label": "GIÁO VIÊN"
+    },
+    {
+        "title": "Hỏi đường",
+        "icon": "🪧",
+        "desc": "Ở đâu, đi thẳng",
+        "color": "blue",
+        "done": 0,
+        "total": 2,
+        "first_label": "Ở ĐÂU"
+    },
+    {
+        "title": "Cảm xúc",
+        "icon": "🙂",
+        "desc": "Vui, buồn",
+        "color": "pink",
+        "done": 0,
+        "total": 2,
+        "first_label": "VUI"
+    },
+    {
+        "title": "Mua sắm",
+        "icon": "🛒",
+        "desc": "Tiền, bao nhiêu",
+        "color": "yellow",
+        "done": 0,
+        "total": 2,
+        "first_label": "TIỀN"
+    }
 ]
 
 REVIEW_CARDS = [
@@ -71,3 +134,147 @@ REVIEW_CARDS = [
     {"title": "Bài kiểm tra nhanh", "icon": "✅", "desc": "Kiểm tra kiến thức tổng hợp", "count": "10 câu", "color": "purple"},
     {"title": "Luyện phản xạ", "icon": "⚡", "desc": "Tăng tốc độ nhận biết ký hiệu", "count": "8 ký hiệu", "color": "orange"},
 ]
+# ==========================================
+# CHI TIẾT BÀI HỌC (DATA MỒI CHO AI)
+# ==========================================
+LESSON_DETAILS = {
+    # --- 1. NHÓM CHÀO HỎI ---
+    "XIN CHÀO": {
+        "label": "XIN CHÀO", 
+        "title": "Xin chào", 
+        "desc": "Vuốt cằm hoặc vẫy tay để chào.", 
+        "icon": "👋", 
+        "topic_type": "conversation",
+        "order": 101
+    },
+    "CẢM ƠN": {
+        "label": "CẢM ƠN", 
+        "title": "Cảm ơn", 
+        "desc": "Gật đầu nhẹ kết hợp tay chạm cằm đưa ra.", 
+        "icon": "🙏", 
+        "topic_type": "conversation",
+        "order": 102
+    },
+    "XIN LỖI": {
+        "label": "XIN LỖI", 
+        "title": "Xin lỗi", 
+        "desc": "Bàn tay xoa nhẹ lên ngực trái.", 
+        "icon": "🙇", 
+        "topic_type": "conversation",
+        "order": 103
+    },
+    "TẠM BIỆT": {
+        "label": "TẠM BIỆT", 
+        "title": "Tạm biệt", 
+        "desc": "Vẫy tay nhẹ nhàng để kết thúc hội thoại.", 
+        "icon": "👋", 
+        "topic_type": "conversation",
+        "order": 104
+    },
+    "TÔI": {
+        "label": "TÔI", 
+        "title": "Tôi (Đại từ)", 
+        "desc": "Dùng ngón trỏ chỉ thẳng vào ngực mình.", 
+        "icon": "🙋", 
+        "topic_type": "conversation",
+        "order": 105
+    },
+    "TÊN": {
+        "label": "TÊN", 
+        "title": "Tên", 
+        "desc": "Chạm hai ngón trỏ và giữa của hai tay vào nhau thành hình dấu nhân.", 
+        "icon": "🏷️", 
+        "topic_type": "conversation",
+        "order": 106
+    },
+
+    # --- 2. NHÓM GIA ĐÌNH ---
+    "BỐ": {
+        "label": "BỐ", 
+        "title": "Bố / Ba", 
+        "desc": "Ký hiệu chỉ người cha trong gia đình.", 
+        "icon": "👨", 
+        "topic_type": "conversation",
+        "order": 201
+    },
+    "MẸ": {
+        "label": "MẸ", 
+        "title": "Mẹ", 
+        "desc": "Ký hiệu chỉ người mẹ trong gia đình.", 
+        "icon": "👩", 
+        "topic_type": "conversation",
+        "order": 202
+    },
+
+    # --- 3. NHÓM TRƯỜNG HỌC ---
+    "GIÁO VIÊN": {
+        "label": "GIÁO VIÊN", 
+        "title": "Giáo viên", 
+        "desc": "Ký hiệu chỉ thầy hoặc cô giáo.", 
+        "icon": "👨‍🏫", 
+        "topic_type": "conversation",
+        "order": 301
+    },
+    "HỌC SINH": {
+        "label": "HỌC SINH", 
+        "title": "Học sinh", 
+        "desc": "Ký hiệu chỉ học sinh đang đi học.", 
+        "icon": "🎒", 
+        "topic_type": "conversation",
+        "order": 302
+    },
+
+    # --- 4. NHÓM HỎI ĐƯỜNG ---
+    "Ở ĐÂU": {
+        "label": "Ở ĐÂU", 
+        "title": "Ở đâu?", 
+        "desc": "Câu hỏi dùng để tìm vị trí, địa điểm.", 
+        "icon": "📍", 
+        "topic_type": "conversation",
+        "order": 401
+    },
+    "ĐI THẲNG": {
+        "label": "ĐI THẲNG", 
+        "title": "Đi thẳng", 
+        "desc": "Chỉ hướng đi thẳng về phía trước.", 
+        "icon": "⬆️", 
+        "topic_type": "conversation",
+        "order": 402
+    },
+
+    # --- 5. NHÓM CẢM XÚC ---
+    "VUI": {
+        "label": "VUI", 
+        "title": "Vui vẻ", 
+        "desc": "Thể hiện trạng thái cảm xúc vui mừng.", 
+        "icon": "😄", 
+        "topic_type": "conversation",
+        "order": 501
+    },
+    "BUỒN": {
+        "label": "BUỒN", 
+        "title": "Buồn bã", 
+        "desc": "Thể hiện trạng thái cảm xúc buồn chán.", 
+        "icon": "😢", 
+        "topic_type": "conversation",
+        "order": 502
+    },
+
+    # --- 6. NHÓM MUA SẮM ---
+    "TIỀN": {
+        "label": "TIỀN", 
+        "title": "Tiền", 
+        "desc": "Ký hiệu liên quan đến tiền bạc, thanh toán.", 
+        "icon": "💵", 
+        "topic_type": "conversation",
+        "order": 601
+    },
+    "BAO NHIÊU": {
+        "label": "BAO NHIÊU", 
+        "title": "Bao nhiêu?", 
+        "desc": "Dùng để hỏi về số lượng hoặc giá cả.", 
+        "icon": "⚖️", 
+        "topic_type": "conversation",
+        "order": 602
+    }
+}

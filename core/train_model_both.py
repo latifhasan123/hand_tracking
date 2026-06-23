@@ -6,9 +6,10 @@ from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 import tensorflow as tf
+from keras.callbacks import Callback
 import tf2onnx
 
-def train_lstm_model():
+def train_lstm_model(ui_callback=None):
     DATA_PATH = "dataset_both"
     
     # 1. ĐỌC DỮ LIỆU
@@ -58,10 +59,15 @@ def train_lstm_model():
     checkpoint = ModelCheckpoint('model/model_both.h5', monitor='val_categorical_accuracy', save_best_only=True, mode='max', verbose=1)
     
     early_stopping = EarlyStopping(monitor='val_categorical_accuracy', patience=20, restore_best_weights=True, verbose=1)
-    
+    class UICallback(Callback):
+        def on_epoch_end(self, epoch, logs=None):
+            if ui_callback:
+                acc = logs.get('categorical_accuracy', 0) * 100
+                val_acc = logs.get('val_categorical_accuracy', 0) * 100
+                ui_callback(epoch + 1, acc, val_acc)
     # 4. BẮT ĐẦU HUẤN LUYỆN
     print("Bắt đầu huấn luyện với hệ thống chống học vẹt...")
-    model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=150, batch_size=16, callbacks=[checkpoint, early_stopping]) 
+    model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=150, batch_size=16, callbacks=[checkpoint, early_stopping, UICallback()])
     
     # Đã đổi tên file labels
     np.save('model/labels_both.npy', actions) 
