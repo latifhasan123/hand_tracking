@@ -32,6 +32,7 @@ try:
         TODAY_LESSONS,
         TOP_MODULES,
         VOCAB_TOPICS,
+        LESSON_DETAILS,
     )
 except ImportError:  # chạy trực tiếp file trong thư mục goc_hoc_tap
     import theme as T
@@ -44,6 +45,7 @@ except ImportError:  # chạy trực tiếp file trong thư mục goc_hoc_tap
         TODAY_LESSONS,
         TOP_MODULES,
         VOCAB_TOPICS,
+        LESSON_DETAILS,
     )
 
 
@@ -57,12 +59,22 @@ COLOR_MAP = {
     "pink": T.PINK,
     "red": T.RED,
 }
-
+# ==========================================
+# DỮ LIỆU THẬT: CÁC CẶP KÝ HIỆU HAY NHẦM LẪN
+# (Dựa trên sự tương đồng về hình dáng tay)
+# ==========================================
+CONFUSED_PAIRS_DATA = [
+    ("D", "Đ", "Chữ D dựng thẳng ngón trỏ, chữ Đ có thêm chuyển động gập ngón trỏ hai lần."),
+    ("K", "H", "Chữ K dựng đứng 2 ngón tách ra, chữ H nằm ngang và khép sát 2 ngón lại."),
+    ("K", "P", "Hình dáng tay y hệt nhau, nhưng chữ K hướng lên, chữ P chúi mũi ngón tay xuống."),
+    ("A", "S", "Chữ A ngón cái để dọc bên mép tay, chữ S ngón cái gập ngang ôm khóa các ngón khác."),
+    ("R", "V", "Chữ V hai ngón trỏ và giữa tách hình chữ V, chữ R hai ngón này đan chéo lên nhau."),
+    ("I", "Y", "Chữ I chỉ dựng đứng mỗi ngón út, chữ Y dựng ngón út và chĩa thêm ngón cái ra ngoài.")
+]
 # ==========================================
 # NẠP DỮ LIỆU THẬT TỪ SQL SERVER
 # ==========================================
 # Nếu SQL lỗi hoặc chưa có bảng, giao diện vẫn chạy bằng dữ liệu mẫu trong data.py.
-LESSON_DETAILS = {}
 SQL_STATUS = "Đang dùng dữ liệu mẫu"
 try:
     try:
@@ -83,8 +95,10 @@ try:
         CONVERSATION_TOPICS = _sql_data["CONVERSATION_TOPICS"]
     if _sql_data.get("LETTER_HINTS"):
         LETTER_HINTS.update(_sql_data["LETTER_HINTS"])
+        
+    # BÍ KÍP 2: XÓA VIỆC GÁN TỪ ĐIỂN RỖNG VÀ DÙNG .update() ĐỂ BẢO TOÀN DATA
     if _sql_data.get("LESSON_DETAILS"):
-        LESSON_DETAILS = _sql_data["LESSON_DETAILS"]
+        LESSON_DETAILS.update(_sql_data["LESSON_DETAILS"])
         
     SQL_STATUS = _sql_data.get("SQL_STATUS", "Đang dùng dữ liệu SQL Server")
 except Exception as _db_error:
@@ -206,21 +220,19 @@ class StudyApp(ctk.CTkFrame):
         divider.grid(row=4, column=0, sticky="ew", padx=25, pady=22)
 
         side_btn(5, "dict", "📖   Từ điển (Cheat Sheet)", lambda: self.show_placeholder("TỪ ĐIỂN", "Danh sách ký hiệu mẫu và mẹo ghi nhớ."), active=False, color=T.ORANGE)
-        def open_auth_popup():
+        # Luồng mới: Cả Sidebar và các nút bên trong đều dùng chung một Panel
+        def handle_sidebar_auth():
             import sys, os
             sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-            import auth_ui
+            try:
+                import auth_ui
+                if auth_ui.CURRENT_USER is not None:
+                    messagebox.showinfo("Tài khoản", f"Bạn đang đăng nhập với tài khoản: {auth_ui.CURRENT_USER['username']}")
+                    return
+            except Exception: pass
             
-            if auth_ui.CURRENT_USER is not None:
-                messagebox.showinfo("Tài khoản", f"Bạn đang đăng nhập với tài khoản: {auth_ui.CURRENT_USER['username']}")
-                return
-                
-            def on_login_success():
-                self.account_btn.configure(text=f"👤   Chào, {auth_ui.CURRENT_USER['username']}", text_color=T.GREEN)
-                if hasattr(self, 'active_page') and self.active_page == "home":
-                    self.show_home()
-                    
-            auth_ui.show_auth_window(self.winfo_toplevel(), on_success=on_login_success)
+            # Gọi màn hình đăng nhập nội tuyến, đăng nhập xong quay về Trang chủ
+            self.show_auth_panel(return_page=self.show_home)
 
         self.account_btn = ctk.CTkButton(
             sidebar,
@@ -232,9 +244,12 @@ class StudyApp(ctk.CTkFrame):
             fg_color="transparent",
             hover_color="#222931",
             text_color=T.ORANGE,
-            command=open_auth_popup
+            command=handle_sidebar_auth
         )
         self.account_btn.grid(row=6, column=0, sticky="ew", padx=20, pady=5)
+        self.refresh_account_button()
+        self.account_btn.grid(row=6, column=0, sticky="ew", padx=20, pady=5)
+        self.refresh_account_button()
         sidebar.grid_rowconfigure(6, weight=1)
         off_btn = ctk.CTkButton(
             sidebar,
@@ -587,7 +602,7 @@ class StudyApp(ctk.CTkFrame):
 
     def top_module_card(self, parent, idx: int, item: dict):
         color = COLOR_MAP[item["color"]]
-        card = ctk.CTkFrame(parent, fg_color=T.PANEL, border_width=2 if idx == 0 else 1, border_color=T.BLUE if idx == 0 else T.BORDER, corner_radius=16)
+        card = ctk.CTkFrame(parent, fg_color=T.PANEL, border_width=0, corner_radius=16)
         card.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 12, 0), pady=0)
         
         card.grid_columnconfigure(1, weight=1)
@@ -658,7 +673,135 @@ class StudyApp(ctk.CTkFrame):
             font=ctk.CTkFont(family=T.FONT, size=14, weight="bold"),
             command=command if command is not None else self.show_home,
         )
+    def refresh_account_button(self, user=None):
+        """
+        Cập nhật nút tài khoản ở góc trái sidebar.
+        Nếu đã đăng nhập thì hiện tên user.
+        Nếu chưa đăng nhập thì hiện Đăng nhập / Đăng ký.
+        """
+        # ==========================================
+        # BÍ KÍP CHỐNG XUNG ĐỘT: Báo cho Giao diện Cha (ui_user.py) cập nhật
+        # ==========================================
+        toplevel = self.winfo_toplevel()
+        if hasattr(toplevel, "refresh_sidebar_auth"):
+            toplevel.refresh_sidebar_auth()
+            
+        if not hasattr(self, "account_btn"):
+            return
 
+        # (Phần code cũ bên dưới của bạn giữ nguyên, không cần sửa)
+        # Nếu chưa truyền user vào thì mới tự tìm trong auth_ui...
+
+        # Nếu chưa truyền user vào thì mới tự tìm trong auth_ui
+        if user is None:
+            import sys
+            import os
+            import importlib
+
+            auth_ui = None
+
+            # Ưu tiên lấy module auth_ui đang có CURRENT_USER trong bộ nhớ
+            for name, module in list(sys.modules.items()):
+                if name == "auth_ui" or name.endswith(".auth_ui"):
+                    if getattr(module, "CURRENT_USER", None):
+                        auth_ui = module
+                        break
+
+            # Nếu chưa tìm thấy thì import như bình thường
+            if auth_ui is None:
+                user_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                if user_dir not in sys.path:
+                    sys.path.insert(0, user_dir)
+
+                try:
+                    auth_ui = importlib.import_module("auth_ui")
+                except Exception as e:
+                    print("Không import được auth_ui trong refresh_account_button:", e)
+                    return
+
+            user = getattr(auth_ui, "CURRENT_USER", None)
+
+        if user:
+            username = (
+                user.get("username")
+                or user.get("Username")
+                or user.get("TenDangNhap")
+                or user.get("ten_dang_nhap")
+                or user.get("HoTen")
+                or user.get("name")
+                or "User"
+            )
+
+            self.account_btn.configure(
+                text=f"👤   Chào, {username}",
+                text_color=T.GREEN,
+                fg_color="#17351F",
+                hover_color="#1F4A2A"
+            )
+
+            try:
+                self.account_btn.update_idletasks()
+            except Exception:
+                pass
+
+        else:
+            self.account_btn.configure(
+                text="👤   Đăng nhập / Đăng ký",
+                text_color=T.ORANGE,
+                fg_color="transparent",
+                hover_color="#222931"
+            )
+    def show_auth_panel(self, return_page=None):
+        import sys, os
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        try:
+            import auth_ui
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Lỗi", f"Không tải được module đăng nhập: {e}")
+            return
+
+        # Nếu đã đăng nhập, tự động đồng bộ UI và quay về
+        if getattr(auth_ui, "CURRENT_USER", None) is not None:
+            self.refresh_account_button(auth_ui.CURRENT_USER)
+            if callable(return_page): return_page()
+            else: self.show_home()
+            return
+
+        # Vẽ trang Đăng nhập nội tuyến (Inline Panel)
+        page = self._clear_page()
+        page.configure(fg_color=T.BG)
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_rowconfigure(0, weight=1)
+
+        auth_area = ctk.CTkFrame(page, fg_color=T.BG, corner_radius=0)
+        auth_area.grid(row=0, column=0, sticky="nsew")
+        auth_area.grid_columnconfigure(0, weight=1)
+        auth_area.grid_rowconfigure(0, weight=1)
+
+        # Gắn nút "Trở về" nổi lên trên cùng góc phải
+        back_holder = ctk.CTkFrame(page, fg_color="transparent")
+        back_holder.place(relx=1.0, y=32, x=-55, anchor="ne")
+        self.back_button(
+            back_holder,
+            command=return_page if callable(return_page) else self.show_home,
+            text="←  Trở về"
+        ).pack()
+        back_holder.lift()
+
+        def after_login_success():
+            # 1. Đổi ngay nút Sidebar thành "👤 Chào, [Tên]"
+            self.refresh_account_button(getattr(auth_ui, "CURRENT_USER", None))
+            
+            # 2. Điều hướng chính xác về nơi người dùng vừa gọi
+            if callable(return_page): 
+                self.after(100, return_page)
+            else: 
+                self.after(100, self.show_home)
+
+        # Nhúng Form đăng nhập vào Panel
+        auth_frame = auth_ui.AuthFrame(auth_area, on_success=after_login_success)
+        auth_frame.grid(row=0, column=0, sticky="nsew")
     def lesson_card(self, parent, idx: int, item: dict):
         card = ctk.CTkFrame(parent, width=230, height=220, fg_color=T.CARD, border_width=1, border_color=T.BORDER, corner_radius=14)
         card.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 12, 0))
@@ -699,8 +842,10 @@ class StudyApp(ctk.CTkFrame):
 
         ctk.CTkButton(bottom, text="Học ngay  ❯", height=38, fg_color=T.BLUE, hover_color=T.BLUE_DARK, command=lambda: self.show_lesson(item.get("label", item["letter"].replace("Chữ ", "")))).pack(fill="x")
     def topic_card(self, parent, idx: int, item: dict):
-        color = COLOR_MAP[item["color"]]
-        card = ctk.CTkFrame(parent, width=230, height=180, fg_color=T.CARD, border_width=1, border_color=T.BORDER, corner_radius=14)
+        color = COLOR_MAP.get(item.get("color", "blue"), T.BLUE)
+        
+        # BÍ KÍP 2: Xóa viền (border_width=0) theo chuẩn Flat Design hiện đại
+        card = ctk.CTkFrame(parent, width=230, height=180, fg_color=T.CARD, border_width=0, corner_radius=14)
         card.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 12, 0))
         card.grid_propagate(False) 
 
@@ -714,11 +859,11 @@ class StudyApp(ctk.CTkFrame):
         text_box = ctk.CTkFrame(content, fg_color="transparent")
         text_box.pack(side="left", fill="both", expand=True, padx=(12, 0))
 
-        # Logic cắt chữ
+        # Logic cắt chữ chống tràn UI
         title_text = item["title"]
         if len(title_text) > 18: title_text = title_text[:15] + "..."
         
-        desc_text = item["desc"]
+        desc_text = item.get("desc", "")
         if len(desc_text) > 42:
             cut = desc_text.rfind(' ', 0, 39)
             if cut == -1: cut = 39
@@ -733,12 +878,22 @@ class StudyApp(ctk.CTkFrame):
 
         pb = ctk.CTkProgressBar(bottom, height=5, progress_color=color, fg_color="#29313B")
         pb.pack(fill="x", pady=(0, 10))
-        pb.set(item.get("progress", 0.5))
+        pb.set(item.get("progress", 0))
 
         stat_row = ctk.CTkFrame(bottom, fg_color="transparent")
         stat_row.pack(fill="x")
-        ctk.CTkLabel(stat_row, text=item["count"], font=ctk.CTkFont(family=T.FONT, size=13, weight="bold"), text_color=color).pack(side="left")
+        ctk.CTkLabel(stat_row, text=item.get("count", "0 bài học"), font=ctk.CTkFont(family=T.FONT, size=13, weight="bold"), text_color=color).pack(side="left")
         ctk.CTkLabel(stat_row, text="›", font=ctk.CTkFont(size=28), text_color=T.MUTED).pack(side="right")
+        
+        # BÍ KÍP 3: Gắn sự kiện click để nhảy vào thẳng bài học giống trang Giao tiếp
+        def on_click(e):
+            self.show_lesson(item.get("first_label", "D"))
+            
+        card.bind("<Button-1>", on_click)
+        for child in [content, icon_box, text_box, bottom, stat_row]:
+            child.bind("<Button-1>", on_click)
+            for subchild in child.winfo_children():
+                subchild.bind("<Button-1>", on_click)
     # ---------- PAGES ----------
     def show_home(self):
         page = self._content()
@@ -781,7 +936,37 @@ class StudyApp(ctk.CTkFrame):
         topics_grid.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 20))
         for i in range(3):
             topics_grid.grid_columnconfigure(i, weight=1)
+            
+        # ==========================================
+        # BÍ KÍP 1: KẾT NỐI DỮ LIỆU THẬT CHO CHỦ ĐỀ PHỔ BIẾN
+        # ==========================================
+        import sys, os
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        try:
+            import auth_ui
+            learned = auth_ui.LEARNED_LETTERS or []
+        except Exception:
+            learned = []
+
+        # Bản đồ khóa chính để đếm
+        topic_mapping = {
+            "Chào hỏi": ["XIN CHÀO", "CẢM ƠN", "XIN LỖI", "TẠM BIỆT", "TÔI", "TÊN"],
+            "Gia đình": ["BỐ", "MẸ"],
+            "Trường học": ["GIÁO VIÊN", "HỌC SINH"]
+        }
+
         for i, item in enumerate(POPULAR_TOPICS):
+            title = item.get("title")
+            if title in topic_mapping:
+                lessons = topic_mapping[title]
+                total = len(lessons)
+                done = len([l for l in lessons if l in learned])
+                
+                # Cập nhật số liệu vào dictionary trước khi ném cho thẻ vẽ
+                item["progress"] = done / total if total > 0 else 0
+                item["count"] = f"{done} / {total} câu" if title == "Chào hỏi" else f"{done} / {total} bài"
+                item["first_label"] = lessons[0] if lessons else "D"
+                
             self.topic_card(topics_grid, i, item)
 
         right = ctk.CTkFrame(page, fg_color="transparent", width=295)
@@ -1270,9 +1455,36 @@ class StudyApp(ctk.CTkFrame):
         ctk.CTkLabel(info, text="📘  Thông tin bài học", font=ctk.CTkFont(size=18, weight="bold"), text_color=T.BLUE).pack(anchor="w", padx=20, pady=(22, 15))
         self.info_item(info, "📊", "Mức độ", lesson.get("difficulty", "Dễ"), T.GREEN)
         self.info_item(info, "🕘", "Thời gian", lesson.get("duration", "2 phút"), T.BLUE)
-        self.info_item(info, "🏆", "Tiến độ khóa học", "3 / 29", T.PURPLE)
-        ctk.CTkProgressBar(info, height=7, progress_color=T.PURPLE, fg_color="#2B3139").pack(fill="x", padx=20, pady=(10, 5))
-        ctk.CTkLabel(info, text="10% hoàn thành", text_color=T.MUTED).pack(anchor="w", padx=20)
+        
+        # ==========================================
+        # BÍ KÍP: TỰ ĐỘNG THAY ĐỔI NHÃN VÀ CẬP NHẬT SỐ LIỆU THẬT
+        # ==========================================
+        import sys, os
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        try:
+            import auth_ui
+            learned = auth_ui.LEARNED_LETTERS or []
+        except Exception:
+            learned = []
+
+        # Lấy danh sách tổng số bài của mục hiện tại (29 chữ cái hoặc 14 câu giao tiếp)
+        sequence = self.get_lesson_sequence(lesson)
+        total_items = len(sequence) if sequence else 1
+        
+        # Đếm xem người dùng đã học bao nhiêu bài trong nhóm này
+        done_items = len([k for k in sequence if k in learned])
+        percent = done_items / total_items
+        
+        # Tự động thay đổi tên Nhãn theo ngữ cảnh (Bảng chữ cái vs Giao tiếp)
+        progress_label = "Mẫu câu hoàn thành" if topic_type == "conversation" else "Tiến độ bảng chữ cái"
+        
+        self.info_item(info, "🏆", progress_label, f"{done_items} / {total_items}", T.PURPLE)
+        
+        pb = ctk.CTkProgressBar(info, height=7, progress_color=T.PURPLE, fg_color="#2B3139")
+        pb.pack(fill="x", padx=20, pady=(10, 5))
+        pb.set(percent)
+        
+        ctk.CTkLabel(info, text=f"{int(percent * 100)}% hoàn thành", text_color=T.MUTED).pack(anchor="w", padx=20)
 
     def info_item(self, parent, icon, label, value, color):
         row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -1317,22 +1529,40 @@ class StudyApp(ctk.CTkFrame):
             except Exception:
                 pass
 
-    def show_camera_practice(self, letter="D"):
+    # THÊM BIẾN practice_mode=None VÀO ĐẦU HÀM
+    def show_camera_practice(self, letter="D", pair_list=None, back_cmd=None, practice_mode=None):
         page = self._clear_page()
         
-        # BÍ KÍP 1: Lấy trước dữ liệu bài học để lôi ảnh ra
-        lesson = self.get_lesson(letter)
+        self.practice_targets = pair_list if pair_list else [letter]
+        self.current_target_idx = 0
+        
+        def get_current_target():
+            return self.practice_targets[self.current_target_idx]
+            
+        initial_letter = get_current_target()
+        lesson = self.get_lesson(initial_letter)
         
         wrapper = ctk.CTkFrame(page, fg_color=T.BG)
         wrapper.pack(fill="both", expand=True, padx=30, pady=30)
         
-        # --- HEADER ---
         header = ctk.CTkFrame(wrapper, fg_color="transparent")
         header.pack(fill="x", pady=(0, 20))
         
         title_box = ctk.CTkFrame(header, fg_color="transparent")
         title_box.pack(side="left")
-        self._title(title_box, "LUYỆN TẬP BẰNG CAMERA", f"Thực hành nhận diện ký hiệu: {letter}")
+        
+        # ==========================================
+        # BÍ KÍP 1: TÁCH BIỆT TIÊU ĐỀ THÔNG MINH THEO CHẾ ĐỘ
+        # ==========================================
+        if practice_mode == "weak_signs":
+            self._title(title_box, "KÝ HIỆU CẦN CHÚ Ý", f"Thực hành {len(self.practice_targets)} ký hiệu bạn làm sai nhiều nhất")
+        elif pair_list:
+            if len(pair_list) > 2:
+                self._title(title_box, "ÔN TẬP TỪ VỰNG", f"Thực hành liên hoàn {len(pair_list)} ký hiệu bạn đã học")
+            else:
+                self._title(title_box, "LUYỆN TẬP PHÂN BIỆT", f"Thực hành liên hoàn cặp ký hiệu: {pair_list[0]} ↔ {pair_list[1]}")
+        else:
+            self._title(title_box, "LUYỆN TẬP BẰNG CAMERA", f"Thực hành nhận diện ký hiệu: {initial_letter}")
         
         def safe_stop():
             self.practice_camera_on = False
@@ -1347,9 +1577,14 @@ class StudyApp(ctk.CTkFrame):
 
         def go_back():
             safe_stop()
-            self.show_lesson(letter)
+            if back_cmd:
+                back_cmd()
+            elif pair_list:
+                self.show_confused_letters()
+            else:
+                self.show_lesson(initial_letter)
 
-        self.back_button(header, command=go_back, text="←  Về bài học").pack(side="right", anchor="n", pady=5)
+        self.back_button(header, command=go_back, text="←  Trở về").pack(side="right", anchor="n", pady=5)
 
         # --- BODY ---
         body = ctk.CTkFrame(wrapper, fg_color="transparent")
@@ -1364,11 +1599,16 @@ class StudyApp(ctk.CTkFrame):
         target_panel.pack(fill="x", pady=(0, 15))
         target_panel.grid_columnconfigure((0, 1), weight=1)
 
-        # BÍ KÍP 2: THAY CHỮ BẰNG ẢNH TRONG KHUNG "KÝ HIỆU CẦN LÀM"
         box_req = ctk.CTkFrame(target_panel, fg_color="transparent")
         box_req.grid(row=0, column=0, sticky="nsew", padx=10, pady=20)
         ctk.CTkLabel(box_req, text="Ký hiệu cần làm", font=ctk.CTkFont(size=14), text_color=T.MUTED).pack(pady=(0, 8))
         
+        self.target_name_label = ctk.CTkLabel(box_req, text=f"Chữ {get_current_target()}", font=ctk.CTkFont(size=24, weight="bold"), text_color=T.BLUE)
+        self.target_name_label.pack(pady=(0, 10))
+
+        # ==========================================
+        # BÍ KÍP 2: ĐÃ XÓA SẠCH DÒNG CODE HIỂN THỊ ẢNH BỊ LẶP (DUPLICATE)
+        # ==========================================
         img_label = self.create_lesson_image_label(box_req, lesson, size=(90, 90), height=90, fallback_font_size=60)
         img_label.configure(fg_color="transparent")
         img_label.pack()
@@ -1411,9 +1651,15 @@ class StudyApp(ctk.CTkFrame):
         toggle_btn.pack(fill="x")
 
         # CỘT TRÁI (CAMERA)
-        left_frame = ctk.CTkFrame(body, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
+# ---------- CỘT TRÁI: CAMERA ----------
+        left_frame = ctk.CTkFrame(
+            body,
+            fg_color=T.PANEL,
+            corner_radius=16,
+            border_width=1,
+            border_color=T.BORDER
+        )
         left_frame.pack(side="left", fill="both", expand=True)
-        left_frame.grid_propagate(False) 
         left_frame.grid_rowconfigure(1, weight=1)
         left_frame.grid_columnconfigure(0, weight=1)
 
@@ -1423,7 +1669,17 @@ class StudyApp(ctk.CTkFrame):
         self.practice_status_label = ctk.CTkLabel(cam_bar, text="● Camera đang tắt", fg_color="#2A2F35", corner_radius=8, text_color=T.MUTED, font=ctk.CTkFont(size=13, weight="bold"), padx=12, pady=6)
         self.practice_status_label.pack(side="left")
         
-        camera_view = ctk.CTkFrame(left_frame, fg_color="#080C11", corner_radius=12)
+# Khóa riêng kích thước khung camera, không cho ảnh camera làm giãn layout
+        REACTION_CAMERA_W = 720
+        REACTION_CAMERA_H = 430
+
+        camera_view = ctk.CTkFrame(
+            left_frame,
+            width=REACTION_CAMERA_W,
+            height=REACTION_CAMERA_H,
+            fg_color="#080C11",
+            corner_radius=12
+        )
         camera_view.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
         camera_view.grid_propagate(False)
         camera_view.grid_rowconfigure(0, weight=1)
@@ -1433,7 +1689,7 @@ class StudyApp(ctk.CTkFrame):
         self.practice_video_label.grid(row=0, column=0, sticky="nsew")
 
         # ==========================================
-        # LOGIC AI CỐT LÕI
+        # LOGIC AI CỐT LÕI VÀ MÀN HÌNH CHÚC MỪNG
         # ==========================================
         self.sequence_data = []
         self.prev_wx = None
@@ -1443,7 +1699,6 @@ class StudyApp(ctk.CTkFrame):
         self.ai_session = None
         self.ai_labels = None
         
-        # BÍ KÍP SENIOR: Thêm các biến giám sát thực hành
         self.success_frames = 0
         self.lesson_completed = False
         self.practice_start_time = None
@@ -1451,8 +1706,13 @@ class StudyApp(ctk.CTkFrame):
         def load_ai_dependencies():
             if self.mp_hands is None:
                 import mediapipe as mp
-                self.mp_hands = mp.solutions.hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7)
+                topic_type = lesson.get("topic_type", "alphabet")
+                max_hands = 2 if topic_type == "conversation" else 1
+                self.mp_hands = mp.solutions.hands.Hands(
+                    static_image_mode=False, max_num_hands=max_hands, min_detection_confidence=0.7
+                )
                 self.mp_draw = mp.solutions.drawing_utils
+                
             if self.ai_session is None:
                 try:
                     import onnxruntime as ort
@@ -1461,8 +1721,7 @@ class StudyApp(ctk.CTkFrame):
                     if os.path.exists("model/model.onnx") and os.path.exists("model/labels.npy"):
                         self.ai_session = ort.InferenceSession("model/model.onnx", providers=['CPUExecutionProvider'])
                         self.ai_labels = np.load("model/labels.npy")
-                except Exception as e:
-                    print("Lỗi load AI model:", e)
+                except Exception as e: print("Lỗi load AI model:", e)
 
         def hand_vectorlize(landmarks, hand_type, prev_wx, prev_wy):
             import numpy as np
@@ -1482,36 +1741,134 @@ class StudyApp(ctk.CTkFrame):
             vector.extend([hand_type, delta_x, delta_y])
             return np.array(vector), wx, wy
 
+        # BÍ KÍP 3: HÀM ĐỔI MỤC TIÊU (TỰ ĐỘNG NHẢY CHỮ)
+        # BÍ KÍP 3: HÀM ĐỔI MỤC TIÊU (TỰ ĐỘNG NHẢY CHỮ)
+        def switch_to_next_target():
+            self.current_target_idx += 1
+            next_letter = get_current_target()
+            next_lesson = self.get_lesson(next_letter)
+            
+            # CẬP NHẬT TÊN CHỮ CÁI MỚI LÊN UI
+            self.target_name_label.configure(text=f"Chữ {next_letter}")
+            
+            # Cập nhật ảnh mẫu
+            new_img = self.load_lesson_image(next_lesson, size=(90, 90))
+            if new_img:
+                img_label.configure(image=new_img, text="")
+                img_label.image = new_img
+            else:
+                img_label.configure(image=None, text=next_lesson.get("icon", "☝"))
+                
+            self.lesson_completed = False
+            self.success_frames = 0
+            feedback_label.configure(text=f"☆ Đã chuyển tiếp! Vui lòng thực hiện ký hiệu chữ {next_letter}.", fg_color="#102034", text_color=T.BLUE)
+
+        # BÍ KÍP 4: BẢNG OVERLAY CHÚC MỪNG HOÀN THÀNH
+        # BÍ KÍP 2: BẢNG OVERLAY CHÚC MỪNG HOÀN THÀNH
+        def show_victory():
+            safe_stop()
+            toggle_btn.pack_forget() 
+            
+            overlay = ctk.CTkFrame(camera_view, fg_color="#080C11", corner_radius=12)
+            overlay.place(relwidth=1, relheight=1)
+            
+            ctk.CTkLabel(overlay, text="🎉", font=ctk.CTkFont(size=90)).pack(pady=(60, 10))
+            ctk.CTkLabel(overlay, text="HOÀN THÀNH XUẤT SẮC", font=ctk.CTkFont(size=24, weight="bold"), text_color=T.GREEN).pack(pady=(0, 10))
+            
+            # XỬ LÝ LỜI CHÚC MỪNG ĐỘNG DỰA TRÊN NGỮ CẢNH
+            if practice_mode == "weak_signs":
+                msg = f"Tuyệt vời! Bạn đã khắc phục thành công\n{len(self.practice_targets)} ký hiệu thường làm sai!"
+            elif pair_list:
+                if len(pair_list) > 2:
+                    msg = f"Tuyệt vời! Bạn đã hoàn thành ôn tập\n{len(pair_list)} ký hiệu liên hoàn!"
+                else:
+                    msg = f"Tuyệt vời! Bạn đã phân biệt chính xác\ncặp chữ {pair_list[0]} và {pair_list[1]}!"
+            else:
+                msg = f"Tuyệt vời! Bạn đã thực hiện xuất sắc\nký hiệu chữ {initial_letter}!"
+                
+            ctk.CTkLabel(overlay, text=msg, font=ctk.CTkFont(size=16), text_color=T.TEXT, justify="center").pack(pady=(0, 30))
+            
+            btn_frame = ctk.CTkFrame(overlay, fg_color="transparent")
+            btn_frame.pack()
+            
+            def practice_again():
+                overlay.destroy() # Xóa overlay
+                toggle_btn.pack(fill="x") # Hiện lại nút bấm
+                
+                # ==========================================
+                # BÍ KÍP FIX LỖI: RESET TOÀN BỘ TRẠNG THÁI UI VỀ "TẮT"
+                # ==========================================
+                toggle_btn.configure(text="▶ Bật Camera", fg_color=T.BLUE, hover_color=T.BLUE_DARK)
+                self.practice_status_label.configure(text="● Camera đang tắt", text_color=T.MUTED, fg_color="#2A2F35")
+                status_value_label.configure(text="Đã tắt", text_color=T.MUTED)
+                accuracy_value_label.configure(text="0%", text_color=T.BLUE)
+                acc_progress.set(0)
+                current_sign_label.configure(text="--", text_color=T.TEXT)
+                
+                # Xóa khung hình camera bị đóng băng
+                from PIL import Image
+                blank_img = Image.new('RGB', (10, 10), (8, 12, 17))
+                blank_ctk = ctk.CTkImage(light_image=blank_img, dark_image=blank_img, size=(10, 10))
+                self.practice_video_label.configure(image=blank_ctk, text="📷\n\nNhấn 'Bật Camera' để bắt đầu")
+                self.practice_video_label.image = blank_ctk
+                # ==========================================
+
+                # Reset về chữ đầu tiên của cặp ký hiệu
+                self.current_target_idx = 0
+                
+                # CẬP NHẬT TÊN CHỮ CÁI VỀ LẠI TỪ KHỞI ĐẦU
+                self.target_name_label.configure(text=f"Chữ {get_current_target()}")
+                
+                first_lesson = self.get_lesson(get_current_target())
+                new_img = self.load_lesson_image(first_lesson, size=(90, 90))
+                if new_img:
+                    img_label.configure(image=new_img, text="")
+                    img_label.image = new_img
+                else:
+                    img_label.configure(image=None, text=first_lesson.get("icon", "☝"))
+                    
+                feedback_label.configure(text=f"☆ Đã khởi động lại. Nhấn 'Bật Camera' để bắt đầu.", fg_color="#2A2F35", text_color=T.MUTED)
+
+            # ==========================================
+            # TRẢ LẠI 2 NÚT BẤM BỊ MẤT Ở ĐÂY NÈ
+            # ==========================================
+            ctk.CTkButton(btn_frame, text="⟳ Luyện tập lại", font=ctk.CTkFont(size=15, weight="bold"), height=45, fg_color=T.PANEL, hover_color=T.CARD_HOVER, border_width=1, border_color=T.BORDER, command=practice_again).pack(side="left", padx=10)
+            ctk.CTkButton(btn_frame, text="← Trở về", font=ctk.CTkFont(size=15, weight="bold"), height=45, fg_color=T.BLUE, hover_color=T.BLUE_DARK, command=go_back).pack(side="left", padx=10)
+
         def record_success(final_accuracy):
             import sys, os, time
             sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+            is_logged_in = False # Cờ kiểm tra trạng thái đăng nhập
             try:
                 import auth_ui, user_db
+                if auth_ui.CURRENT_USER is not None:
+                    is_logged_in = True
+                    user_id = auth_ui.CURRENT_USER["id"]
+                    current_eval_letter = get_current_target() 
+                    if current_eval_letter not in auth_ui.LEARNED_LETTERS:
+                        user_db.mark_as_learned(user_id, current_eval_letter)
+                        auth_ui.LEARNED_LETTERS.append(current_eval_letter)
+                    session_time = max(1, int((time.time() - self.practice_start_time) / 60))
+                    updated_stats = user_db.update_study_stats(user_id, int(final_accuracy * 100), session_time)
+                    if updated_stats:
+                        auth_ui.CURRENT_USER.update(updated_stats)
+            except Exception: pass
+
+            # PHÂN NHÁNH LOGIC: Đi tiếp hay Hoàn thành?
+            if self.current_target_idx < len(self.practice_targets) - 1:
+                status_value_label.configure(text="Tốt lắm!", text_color=T.GREEN)
+                feedback_label.configure(text=f"☆ Đã hoàn thành chữ {get_current_target()}! Chuẩn bị chuyển tiếp...", fg_color="#17351F", text_color=T.GREEN)
+                self.after(1500, switch_to_next_target) 
+            else:
+                status_value_label.configure(text="Hoàn thành!", text_color=T.GREEN)
                 
-                if auth_ui.CURRENT_USER is None:
-                    status_value_label.configure(text="Hoàn thành!", text_color=T.GREEN)
-                    feedback_label.configure(text="☆ Tuyệt vời! Hãy đăng nhập để hệ thống lưu lại thành tích này nhé!", fg_color="#17351F", text_color=T.GREEN)
-                    return
-                
-                user_id = auth_ui.CURRENT_USER["id"]
-                
-                # 1. Đánh dấu chữ cái đã học
-                if letter not in auth_ui.LEARNED_LETTERS:
-                    user_db.mark_as_learned(user_id, letter)
-                    auth_ui.LEARNED_LETTERS.append(letter)
-                
-                # 2. Tính thời gian học (Tính bằng Phút, ít nhất 1 phút)
-                session_time = max(1, int((time.time() - self.practice_start_time) / 60))
-                
-                # 3. Ghi vào CSDL
-                updated_stats = user_db.update_study_stats(user_id, int(final_accuracy * 100), session_time)
-                if updated_stats:
-                    auth_ui.CURRENT_USER.update(updated_stats) # Ép RAM cập nhật để trang Dashboard nhận ngay lập tức
+                # BÍ KÍP XỬ LÝ GIAO DIỆN KHI CHƯA ĐĂNG NHẬP
+                if is_logged_in:
+                    feedback_label.configure(text="☆ Xuất sắc! Hệ thống đã lưu lại tiến độ của bạn.", fg_color="#17351F", text_color=T.GREEN)
+                else:
+                    feedback_label.configure(text="☆ Xuất sắc! Vui lòng Đăng nhập để lưu lại tiến độ nhé.", fg_color="#332200", text_color=T.ORANGE)
                     
-                status_value_label.configure(text="Đã lưu!", text_color=T.GREEN)
-                feedback_label.configure(text="☆ Xuất sắc! Tiến độ, chuỗi ngày và thời gian học đã được cập nhật.", fg_color="#17351F", text_color=T.GREEN)
-            except Exception as e:
-                print("Lỗi lưu DB:", e)
+                self.after(1200, show_victory)
 
         def update_practice_frame():
             if not self.practice_camera_on or self.practice_cap is None: return
@@ -1522,7 +1879,6 @@ class StudyApp(ctk.CTkFrame):
                     import cv2
                     import numpy as np
                     import mediapipe as mp
-                    import customtkinter as ctk
                     from PIL import Image
 
                     frame = cv2.flip(frame, 1)
@@ -1532,6 +1888,8 @@ class StudyApp(ctk.CTkFrame):
                     predicted_char = ""
                     target_confidence = 0.0 
                     hand_detected = False
+                    
+                    current_eval_letter = get_current_target() # Lấy mục tiêu hiện hành
                     
                     if self.mp_hands is not None:
                         results = self.mp_hands.process(frame_rgb)
@@ -1555,8 +1913,10 @@ class StudyApp(ctk.CTkFrame):
                                         max_prob, max_index = np.max(out), np.argmax(out)
                                         if max_prob > 0.5:
                                             predicted_char = str(self.ai_labels[max_index]).upper()
+                                        
+                                        # BÍ KÍP: Luôn chấm điểm dựa trên mục tiêu hiện tại
                                         for idx, lbl in enumerate(self.ai_labels):
-                                            if str(lbl).upper() == letter.upper():
+                                            if str(lbl).upper() == current_eval_letter.upper():
                                                 target_confidence = float(out[idx])
                                                 break
                                     except: pass
@@ -1564,20 +1924,19 @@ class StudyApp(ctk.CTkFrame):
                             self.sequence_data.clear()
                             self.prev_wx, self.prev_wy = None, None
 
-                    # THUẬT TOÁN ĐÁNH GIÁ THỰC HÀNH
                     if target_confidence > 0.8:
                         ui_color = T.GREEN
                         bgr_color = (0, 200, 0)
                         
                         if not self.lesson_completed:
                             self.success_frames += 1
-                            if self.success_frames > 15: # Giữ tay đúng khoảng 1 giây
+                            if self.success_frames > 15: 
                                 self.lesson_completed = True
                                 record_success(target_confidence)
                     elif target_confidence > 0.4:
                         ui_color = T.YELLOW
                         bgr_color = (0, 215, 255)
-                        self.success_frames = 0 # Sai tay là bắt đếm lại từ đầu
+                        self.success_frames = 0 
                     else:
                         ui_color = T.ORANGE
                         bgr_color = (0, 140, 255)
@@ -1591,7 +1950,7 @@ class StudyApp(ctk.CTkFrame):
                         cv2.putText(frame, f"Do chinh xac: {int(target_confidence*100)}%", (18, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.8, bgr_color, 2)
 
                     if predicted_char:
-                        current_sign_label.configure(text=predicted_char, text_color=ui_color if predicted_char == letter else T.ORANGE)
+                        current_sign_label.configure(text=predicted_char, text_color=ui_color if predicted_char == current_eval_letter else T.ORANGE)
                     else:
                         current_sign_label.configure(text="--", text_color=T.TEXT)
                         
@@ -1600,7 +1959,6 @@ class StudyApp(ctk.CTkFrame):
                         acc_progress.set(target_confidence)
                         accuracy_value_label.configure(text=f"{int(target_confidence * 100)}%", text_color=ui_color)
                         
-                        # Chỉ thay đổi chữ hướng dẫn nếu bài học CHƯA HOÀN THÀNH
                         if not self.lesson_completed:
                             if target_confidence > 0.8:
                                 status_value_label.configure(text="Tuyệt vời!", text_color=ui_color)
@@ -1620,12 +1978,11 @@ class StudyApp(ctk.CTkFrame):
                             feedback_label.configure(text="☆ Hãy đưa tay vào camera để bắt đầu.", fg_color="#102034", text_color=T.BLUE)
 
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    label_w = camera_view.winfo_width()
-                    label_h = camera_view.winfo_height()
-                    if label_w < 10: label_w = 480
-                    if label_h < 10: label_h = 320
-                    
-                    scale = min(label_w / w, label_h / h)
+                    # Render camera theo khung cố định, không để ảnh camera kéo giãn giao diện
+                    display_w = REACTION_CAMERA_W
+                    display_h = REACTION_CAMERA_H
+
+                    scale = min(display_w / w, display_h / h)
                     new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
                     
                     frame_resized = cv2.resize(frame_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
@@ -1635,8 +1992,7 @@ class StudyApp(ctk.CTkFrame):
                     
                     self.practice_video_label.configure(image=imgtk, text="")
                     self.practice_video_label.image = imgtk
-            except Exception as e:
-                print("Lỗi khung hình camera:", e)
+            except Exception as e: print("Lỗi khung hình camera:", e)
 
             if self.practice_camera_on:
                 self.practice_after_id = self.after(10, update_practice_frame)
@@ -1650,7 +2006,6 @@ class StudyApp(ctk.CTkFrame):
             
             load_ai_dependencies()
             
-            # Reset thông số đo lường mỗi lần bật lại cam
             self.success_frames = 0
             self.lesson_completed = False
             self.practice_start_time = time.time()
@@ -1673,18 +2028,26 @@ class StudyApp(ctk.CTkFrame):
             self.sequence_data.clear()
             self.prev_wx, self.prev_wy = None, None
             
+            self.current_target_idx = 0
+            first_lesson = self.get_lesson(get_current_target())
+            new_img = self.load_lesson_image(first_lesson, size=(90, 90))
+            if new_img:
+                img_label.configure(image=new_img, text="")
+                img_label.image = new_img
+            else:
+                img_label.configure(image=None, text=first_lesson.get("icon", "☝"))
+            
             toggle_btn.configure(text="▶ Bật Camera", fg_color=T.BLUE, hover_color=T.BLUE_DARK)
             self.practice_status_label.configure(text="● Camera đang tắt", text_color=T.MUTED, fg_color="#2A2F35")
             status_value_label.configure(text="Đã tắt", text_color=T.MUTED)
             accuracy_value_label.configure(text="0%", text_color=T.BLUE)
             acc_progress.set(0)
-            current_sign_label.configure(text="--", text_color=T.TEXT)
+            current_sign_label.configure(text="--", text_color  =T.TEXT)
             feedback_label.configure(text="☆ Camera đã tắt. Nhấn 'Bật Camera' để luyện tập.", fg_color="#2A2F35", text_color=T.MUTED)
             
             from PIL import Image
             blank_img = Image.new('RGB', (10, 10), (8, 12, 17))
             blank_ctk = ctk.CTkImage(light_image=blank_img, dark_image=blank_img, size=(10, 10))
-            
             self.practice_video_label.configure(image=blank_ctk, text="📷\n\nNhấn 'Bật Camera' để bắt đầu")
             self.practice_video_label.image = blank_ctk
     def remove_duplicate_topics(self, items):
@@ -1821,7 +2184,7 @@ class StudyApp(ctk.CTkFrame):
         ctk.CTkLabel(highlight, text=f"★  {right_title}", font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT).pack(anchor="w", padx=18, pady=(20, 14))
         first = items[0]
         color = COLOR_MAP[first["color"]]
-        top = ctk.CTkFrame(highlight, fg_color=T.CARD, corner_radius=13, border_width=1, border_color=T.BORDER)
+        top = ctk.CTkFrame(highlight, fg_color=T.CARD, corner_radius=13, border_width=0)
         top.pack(fill="x", padx=18)
         self.icon_box(top, first["icon"], color, size=62, font_size=22).grid(row=0, column=0, padx=16, pady=16, rowspan=2)
         ctk.CTkLabel(top, text=first["title"], font=ctk.CTkFont(size=19, weight="bold"), text_color=T.TEXT).grid(row=0, column=1, sticky="sw", pady=(18, 0))
@@ -1901,7 +2264,7 @@ class StudyApp(ctk.CTkFrame):
         color = COLOR_MAP[item["color"]]
         
         # Khung ngoài (Khóa cứng chiều cao 180px giống hệt trang chủ)
-        card = ctk.CTkFrame(parent, height=180, fg_color=T.CARD, border_width=1, border_color=color if col == 0 and row == 0 else T.BORDER, corner_radius=14)
+        card = ctk.CTkFrame(parent, height=180, fg_color=T.CARD, border_width=0, corner_radius=14)
         card.grid(row=row, column=col, sticky="nsew", padx=(0 if col == 0 else 16, 0), pady=(0 if row == 0 else 16, 16))
         card.grid_propagate(False) 
 
@@ -1975,7 +2338,7 @@ class StudyApp(ctk.CTkFrame):
         self._title(page, "ÔN TẬP", "Luyện tập và củng cố kiến thức đã học")
 
         header_right = ctk.CTkFrame(page, fg_color="transparent")
-        header_right.grid(row=0, column=1, rowspan=2, sticky="ne", padx=(20, 60), pady=(0, 10))
+        header_right.grid(row=0, column=1, sticky="ne", padx=(20, 60), pady=(0, 10))
 
         self.back_button(
             header_right,
@@ -1983,48 +2346,98 @@ class StudyApp(ctk.CTkFrame):
             text="←  Trang chính"
         ).pack(anchor="e", pady=(0, 8))
 
-        ctk.CTkLabel(
-            header_right,
-            text="☝  ☝",
-            font=ctk.CTkFont(size=46),
-            text_color=T.BLUE
-        ).pack(anchor="e")
+        ctk.CTkLabel(header_right, text="☝  💬", font=ctk.CTkFont(size=46), text_color=T.BLUE).pack(anchor="e")
 
-        modes = ctk.CTkFrame(page, fg_color="transparent")
-        modes.grid(row=2, column=0, sticky="ew", padx=(0, 25), pady=(0, 20))
-        modes.grid_columnconfigure((0, 1, 2), weight=1)
-        mode_items = [
-            ("Flashcard", "Ôn tập từ vựng và\nký hiệu qua thẻ nhớ", "▣", T.BLUE),
-            ("Trắc nghiệm", "Kiểm tra kiến thức với\ncâu hỏi trắc nghiệm", "☑", T.PURPLE),
-            ("Luyện ký hiệu", "Luyện nhận diện và\nthực hành ký hiệu", "☝", T.GREEN),
-        ]
-        for i, (name, desc, icon, color) in enumerate(mode_items):
-            card = ctk.CTkFrame(modes, fg_color=T.PANEL, corner_radius=16, border_width=2 if i == 0 else 1, border_color=T.BLUE if i == 0 else T.BORDER)
-            card.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 16, 0))
-            card.grid_columnconfigure(1, weight=1)
-            self.icon_box(card, icon, color, size=64, font_size=25).grid(row=0, column=0, padx=20, pady=20)
-            ctk.CTkLabel(card, text=name, font=ctk.CTkFont(size=19, weight="bold"), text_color=T.TEXT).grid(row=0, column=1, sticky="sw", pady=(22, 0))
-            ctk.CTkLabel(card, text=desc, justify="left", font=ctk.CTkFont(size=14), text_color=T.MUTED).grid(row=1, column=1, sticky="nw", pady=(3, 18))
-            ctk.CTkLabel(card, text="›", font=ctk.CTkFont(size=30), text_color=T.MUTED).grid(row=0, column=2, rowspan=2, padx=18)
-
+        # --- GỢI Ý ÔN TẬP ---
         suggestions = ctk.CTkFrame(page, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
-        suggestions.grid(row=3, column=0, sticky="ew", padx=(0, 25), pady=(0, 20))
+        suggestions.grid(row=1, column=0, sticky="new", padx=(0, 25), pady=(15, 20))
         suggestions.grid_columnconfigure(0, weight=1)
         self.section_header(suggestions, 0, "Gợi ý ôn tập hôm nay", "★", show_all=False)
+        
         grid = ctk.CTkFrame(suggestions, fg_color="transparent")
         grid.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 18))
-        for c in range(4):
+        for c in range(2): 
             grid.grid_columnconfigure(c, weight=1)
-        for i, it in enumerate(REVIEW_CARDS):
-            self.review_suggestion(grid, i, it)
+            
+        import sys, os
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        try:
+            import auth_ui
+            learned_count = len(auth_ui.LEARNED_LETTERS) if auth_ui.CURRENT_USER else 0
+        except Exception:
+            learned_count = 0
 
+        # ==========================================
+        # BÍ KÍP 1: TÁCH BẢN SAO DỮ LIỆU VÀ "HÔ BIẾN" THẺ BỊ TRÙNG LẶP
+        # ==========================================
+        import copy
+        display_cards = copy.deepcopy(REVIEW_CARDS)
+
+        for i, it in enumerate(display_cards):
+            r, c = divmod(i, 2)
+            if it.get("title") == "Các chữ hay nhầm":
+                it["count"] = f"{len(CONFUSED_PAIRS_DATA)} cặp chữ"
+            elif it.get("title") == "Từ đã học gần đây":
+                it["count"] = f"{learned_count} từ"
+            elif "phản xạ" in it.get("title", "").lower():
+                total_reaction = learned_count if learned_count > 0 else len(ALPHABET or [])
+                it["count"] = f"{min(10, max(1, total_reaction))} lượt"
+            # Chặn đứng sự dư thừa: Đổi thẻ "Kiểm tra nhanh" thành "Ký hiệu cần chú ý"
+            elif "kiểm tra" in it.get("title", "").lower():
+                it["title"] = "Ký hiệu cần chú ý"
+                it["desc"] = "Khắc phục các ký hiệu bạn làm sai nhiều nhất"
+                it["icon"] = "🎯"
+                it["color"] = "red"  # Đổi sang màu đỏ cảnh báo
+                it["count"] = "Phân tích AI"
+                
+            self.review_suggestion(grid, r, c, it)
+
+        # --- KHUNG CHỨA CỘT PHẢI ---
+        # --- KHUNG CHỨA CỘT PHẢI ---
+        right_container = ctk.CTkFrame(page, width=330, fg_color="transparent")
+        # BÍ KÍP 1: Dùng sticky="nsew" và pady=(15, 20) để khung này có chiều cao bằng đúng khung bên trái
+        right_container.grid(row=1, column=1, sticky="nsew", pady=(15, 20))
+        
+        # (ĐÃ XÓA KHUNG "PHÂN TÍCH TỪ AI HỆ THỐNG" ĐỂ TRÁNH DƯ THỪA)
+
+        challenge = ctk.CTkFrame(right_container, width=330, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
+        # BÍ KÍP 2: Dùng fill="both", expand=True để Bài Test giãn ra lấp đầy toàn bộ cột phải
+        challenge.pack(fill="both", expand=True)
+        
+        ctk.CTkLabel(challenge, text="⚡  Bài test hôm nay", font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT).pack(anchor="w", padx=22, pady=(20, 5))
+        
+        center_box = ctk.CTkFrame(challenge, fg_color="transparent")
+        # Căn giữa nội dung bên trong bề mặt đã được kéo giãn
+        center_box.pack(fill="both", expand=True)
+        
+        # Tăng một chút padding (pady) để nội dung đẩy ra giữa đẹp mắt hơn
+        ctk.CTkLabel(center_box, text="🏆", font=ctk.CTkFont(size=85)).pack(pady=(45, 15))
+        ctk.CTkLabel(center_box, text="Kiểm tra năng lực", font=ctk.CTkFont(size=19, weight="bold"), text_color=T.BLUE).pack()
+        ctk.CTkLabel(center_box, text="Hệ thống sẽ chọn ngẫu nhiên 10 câu\ntừ các chủ đề để đánh giá trình độ.", text_color=T.MUTED, font=ctk.CTkFont(size=14), justify="center", wraplength=280).pack(pady=(10, 20))
+        
+        ctk.CTkButton(challenge, text="▶  Bắt đầu thi", height=48, font=ctk.CTkFont(size=14, weight="bold"), fg_color=T.BLUE, hover_color=T.BLUE_DARK, command=self.show_quick_quiz).pack(fill="x", padx=20, pady=(0, 20))
+
+        try:
+            user_data = auth_ui.CURRENT_USER or {}
+            chuoi_ngay = user_data.get("ChuoiNgayHoc", 0)
+            do_chinh_xac = user_data.get("DoChinhXacTB", 0)
+            thoi_gian_phut = user_data.get("ThoiGianHoc", 0)
+        except Exception:
+            chuoi_ngay, do_chinh_xac, thoi_gian_phut = 0, 0, 0
+            
+        gio = thoi_gian_phut // 60
+        phut = thoi_gian_phut % 60
+        thoi_gian_str = f"{gio}h {phut}m" if gio > 0 else f"{phut}m"
+
+        # --- BẢNG THỐNG KÊ TRÀN VIỀN ---
         stats = ctk.CTkFrame(page, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
-        stats.grid(row=4, column=0, sticky="ew", padx=(0, 25))
+        stats.grid(row=2, column=0, columnspan=2, sticky="ew", padx=(0, 0), pady=(0, 20))
         stats.grid_columnconfigure((0, 1, 2), weight=1)
+        
         for i, (icon, label, value, sub, color) in enumerate([
-            ("🎯", "Độ chính xác TB", "91%", "Cao hơn 12% so với tuần trước ↗", T.GREEN),
-            ("📅", "Chuỗi ngày học", "5 ngày", "Cố gắng duy trì mỗi ngày! 🔥", T.GREEN),
-            ("🕘", "Tổng thời gian học", "2h 35m", "Tổng thời gian luyện tập", T.BLUE),
+            ("🎯", "Độ chính xác TB", f"{do_chinh_xac}%", "Trung bình các bài luyện tập", T.GREEN),
+            ("📅", "Chuỗi ngày học", f"{chuoi_ngay} ngày", "Cố gắng duy trì mỗi ngày! 🔥" if chuoi_ngay > 0 else "Hãy bắt đầu ngay!", T.GREEN),
+            ("🕘", "Tổng thời gian học", thoi_gian_str, "Tổng thời gian thực hành", T.BLUE),
         ]):
             cell = ctk.CTkFrame(stats, fg_color="transparent")
             cell.grid(row=0, column=i, sticky="nsew", padx=20, pady=20)
@@ -2034,28 +2447,1690 @@ class StudyApp(ctk.CTkFrame):
             ctk.CTkLabel(box, text=label, font=ctk.CTkFont(size=15, weight="bold"), text_color=T.TEXT).pack(anchor="w")
             ctk.CTkLabel(box, text=value, font=ctk.CTkFont(size=27, weight="bold"), text_color=color).pack(anchor="w")
             ctk.CTkLabel(box, text=sub, font=ctk.CTkFont(size=12), text_color=T.MUTED).pack(anchor="w")
-
-        challenge = ctk.CTkFrame(page, width=350, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
-        challenge.grid(row=2, column=1, rowspan=3, sticky="nsew")
-        challenge.grid_propagate(False)
-        ctk.CTkLabel(challenge, text="⚡  Thử thách hôm nay", font=ctk.CTkFont(size=19, weight="bold"), text_color=T.TEXT).pack(anchor="w", padx=22, pady=(25, 15))
-        ctk.CTkLabel(challenge, text="🤏", width=215, height=215, fg_color="#0B1520", corner_radius=110, font=ctk.CTkFont(size=100)).pack(pady=(0, 10))
-        ctk.CTkLabel(challenge, text="1 / 10", font=ctk.CTkFont(size=16), text_color=T.BLUE).pack(anchor="w", padx=30)
-        ctk.CTkLabel(challenge, text="Ký hiệu này là chữ gì?", font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT).pack(anchor="w", padx=30, pady=(18, 12))
-        for code, ans in [("A", "Chữ C"), ("B", "Chữ O"), ("C", "Chữ G"), ("D", "Chữ Q")]:
-            ctk.CTkButton(challenge, text=f"{code}     {ans}", height=48, anchor="w", fg_color=T.CARD, hover_color=T.CARD_HOVER, text_color=T.TEXT, corner_radius=9).pack(fill="x", padx=30, pady=5)
-        ctk.CTkButton(challenge, text="▶  Bắt đầu ôn tập", height=55, fg_color=T.BLUE, hover_color=T.BLUE_DARK).pack(fill="x", padx=30, pady=(25, 20))
-
-    def review_suggestion(self, parent, col, it):
+    def review_suggestion(self, parent, row, col, it):
         color = COLOR_MAP[it["color"]]
         card = ctk.CTkFrame(parent, fg_color=T.CARD, border_width=1, border_color=T.BORDER, corner_radius=14)
-        card.grid(row=0, column=col, sticky="nsew", padx=(0 if col == 0 else 12, 0))
-        ctk.CTkLabel(card, text=it["icon"], width=58, height=58, fg_color=color, corner_radius=30, font=ctk.CTkFont(size=20, weight="bold"), text_color=T.TEXT).pack(anchor="w", padx=18, pady=(18, 8))
-        ctk.CTkLabel(card, text=it["title"], font=ctk.CTkFont(size=17, weight="bold"), text_color=T.TEXT).pack(anchor="w", padx=18)
-        ctk.CTkLabel(card, text=it["desc"], wraplength=175, justify="left", font=ctk.CTkFont(size=13), text_color=T.MUTED).pack(anchor="w", padx=18, pady=(5, 12))
+        pad_x = (0 if col == 0 else 14, 0)
+        pad_y = (0 if row == 0 else 14, 0)
+        card.grid(row=row, column=col, sticky="nsew", padx=pad_x, pady=pad_y)
+        
+        ctk.CTkLabel(card, text=it["icon"], width=50, height=50, fg_color=color, corner_radius=25, font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT).pack(anchor="w", padx=18, pady=(18, 8))
+        ctk.CTkLabel(card, text=it["title"], font=ctk.CTkFont(size=16, weight="bold"), text_color=T.TEXT, wraplength=220, justify="left").pack(anchor="w", padx=18)
+        ctk.CTkLabel(card, text=it["desc"], wraplength=220, justify="left", font=ctk.CTkFont(size=13), text_color=T.MUTED).pack(anchor="w", padx=18, pady=(5, 12))
         ctk.CTkLabel(card, text=it["count"], fg_color="#132033", corner_radius=7, text_color=color, font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=18, pady=(0, 18))
 
+        def on_click(e):
+            if it["title"] == "Các chữ hay nhầm":
+                self.show_confused_letters()
+            elif it["title"] == "Từ đã học gần đây":
+                self.show_recent_words()
+            # ==========================================
+            # BÍ KÍP 3: GỌI HÀM XỬ LÝ GIAO DIỆN TRUNG GIAN
+            # ==========================================
+            elif it["title"] == "Ký hiệu cần chú ý":
+                self.show_weak_signs()
+            elif "phản xạ" in it["title"].lower():
+                self.show_reaction_training()
+            elif "kiểm tra" in it["title"].lower():
+                self.show_quick_quiz()
+            else:
+                messagebox.showinfo("Đang phát triển", f"Tính năng {it['title']} sẽ được cập nhật ở phiên bản sau.")
+                
+        card.bind("<Button-1>", on_click)
+        for child in card.winfo_children():
+            child.bind("<Button-1>", on_click)
+    def show_confused_letters(self):
+        page = self._content()
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_columnconfigure(1, weight=0)
+        
+        self._title(page, "CÁC CHỮ HAY NHẦM", "Phân biệt các cặp ký hiệu có hình dáng tương đồng")
 
+        header_right = ctk.CTkFrame(page, fg_color="transparent")
+        header_right.grid(row=0, column=1, sticky="ne", padx=(20, 60), pady=(0, 10))
+        self.back_button(header_right, command=self.show_review, text="←  Trở về").pack(anchor="e", pady=(0, 8))
+
+        # Khung chứa danh sách lưới
+        main = ctk.CTkFrame(page, fg_color="transparent")
+        main.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=(0, 25), pady=(20, 0))
+        for c in range(2): 
+            main.grid_columnconfigure(c, weight=1)
+
+        # Dữ liệu Mock mô phỏng các chữ hay nhầm
+        confused_pairs = [
+            ("A", "Ă", "Khác biệt ở chuyển động vẫy cổ tay nhẹ."),
+            ("C", "G", "Độ mở của ngón cái và ngón trỏ khác nhau."),
+            ("D", "Đ", "Chữ Đ có thêm chuyển động gập ngón trỏ hai lần."),
+            ("U", "Ư", "Chữ Ư có thêm ngón cái chĩa ra tạo dấu móc."),
+            ("O", "Ô", "Khác biệt ở thao tác vẽ thêm dấu mũ (di chuyển xuống)."),
+            ("E", "Ê", "Giữ nguyên hình tay, chỉ vẽ thêm dấu mũ.")
+        ]
+
+        # Quét trực tiếp từ nguồn dữ liệu thật thay vì tạo mới
+        for i, (l1, l2, desc) in enumerate(CONFUSED_PAIRS_DATA):
+            r, c = divmod(i, 2)
+            self.confused_pair_card(main, r, c, l1, l2, desc)
+
+    def confused_pair_card(self, parent, row, col, l1, l2, desc):
+        card = ctk.CTkFrame(parent, fg_color=T.PANEL, border_width=1, border_color=T.BORDER, corner_radius=16)
+        # Giữ khoảng cách chuẩn: cách đều nhau 20px
+        pad_x = (0 if col == 0 else 20, 0)
+        card.grid(row=row, column=col, sticky="nsew", padx=pad_x, pady=(0, 20))
+        
+        # Tiêu đề card
+        header = ctk.CTkFrame(card, fg_color="transparent")
+        header.pack(fill="x", padx=20, pady=(20, 10))
+        ctk.CTkLabel(header, text=f"Phân biệt {l1} và {l2}", font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT).pack(side="left")
+        
+        # Khung chứa 2 ảnh đặt cạnh nhau
+        img_container = ctk.CTkFrame(card, fg_color="transparent")
+        img_container.pack(fill="x", padx=20, pady=(5, 10))
+        img_container.grid_columnconfigure((0, 1, 2), weight=1)
+        
+        # Ảnh 1 (Bên trái)
+        l1_lesson = self.get_lesson(l1)
+        left_img = self.create_lesson_image_label(img_container, l1_lesson, size=(100, 100), height=130, fallback_font_size=60)
+        left_img.configure(fg_color="#0E1722", corner_radius=12)
+        left_img.grid(row=0, column=0, sticky="ew")
+        
+        # Chữ VS ở giữa
+        ctk.CTkLabel(img_container, text="↔", font=ctk.CTkFont(size=32, weight="bold"), text_color=T.MUTED).grid(row=0, column=1)
+        
+        # Ảnh 2 (Bên phải)
+        l2_lesson = self.get_lesson(l2)
+        right_img = self.create_lesson_image_label(img_container, l2_lesson, size=(100, 100), height=130, fallback_font_size=60)
+        right_img.configure(fg_color="#0E1722", corner_radius=12)
+        right_img.grid(row=0, column=2, sticky="ew")
+        
+        # Chú thích điểm khác biệt
+        ctk.CTkLabel(card, text=desc, text_color=T.MUTED, font=ctk.CTkFont(size=14), wraplength=280, justify="left").pack(anchor="w", padx=20, pady=(5, 15))
+        
+        # Nút hành động
+        # Nút hành động
+        btn = ctk.CTkButton(card, text="▶ Luyện tập cặp này", font=ctk.CTkFont(size=14, weight="bold"), fg_color=T.BLUE, hover_color=T.BLUE_DARK, height=44)
+        
+        # BÍ KÍP 1: Truyền hẳn 1 danh sách (list) chứa 2 chữ cái vào tham số pair_list
+        btn.configure(command=lambda: self.show_camera_practice(pair_list=[l1, l2])) 
+        
+        btn.pack(fill="x", padx=20, pady=(0, 20))
+    def show_recent_words(self):
+        import sys, os
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        
+        # ==========================================
+        # BÍ KÍP FIX LỖI 1: Tự động dùng thuật toán thông minh nhất để cập nhật Sidebar
+        # ==========================================
+        self.refresh_account_button()
+        
+        is_logged_in = False
+        learned = []
+        
+        # ==========================================
+        # BÍ KÍP FIX LỖI 2: Truy tìm đúng module auth_ui đang giữ thông tin người dùng
+        # ==========================================
+        auth_module = None
+        for name, module in list(sys.modules.items()):
+            if name == "auth_ui" or name.endswith(".auth_ui"):
+                if getattr(module, "CURRENT_USER", None):
+                    auth_module = module
+                    break
+                    
+        # Nếu chưa có thì fallback về import thông thường
+        if auth_module is None:
+            try:
+                import auth_ui
+                auth_module = auth_ui
+            except Exception:
+                pass
+
+        # Lấy dữ liệu thật
+        if auth_module and getattr(auth_module, "CURRENT_USER", None):
+            is_logged_in = True
+            learned = getattr(auth_module, "LEARNED_LETTERS", [])
+
+        # --- GIAO DIỆN CHÍNH ---
+        page = self._content()
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_columnconfigure(1, weight=0)
+        
+        self._title(page, "TỪ ĐÃ HỌC GẦN ĐÂY", "Ôn tập lại các ký hiệu bạn vừa hoàn thành")
+
+        header_right = ctk.CTkFrame(page, fg_color="transparent")
+        header_right.grid(row=0, column=1, sticky="ne", padx=(20, 60), pady=(0, 10))
+        self.back_button(header_right, command=self.show_review, text="←  Trở về").pack(anchor="e", pady=(0, 8))
+
+        main = ctk.CTkFrame(page, fg_color="transparent")
+        main.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=(0, 25), pady=(20, 0))
+        
+        # BÍ KÍP 3: Xử lý giao diện cho trạng thái CHƯA ĐĂNG NHẬP
+        # BÍ KÍP 3: Xử lý giao diện cho trạng thái CHƯA ĐĂNG NHẬP
+        if not is_logged_in:
+            empty_panel = ctk.CTkFrame(
+                main,
+                fg_color=T.PANEL,
+                corner_radius=16,
+                border_width=1,
+                border_color=T.BORDER
+            )
+            empty_panel.pack(fill="x", pady=20)
+
+            ctk.CTkLabel(
+                empty_panel,
+                text="🔒",
+                font=ctk.CTkFont(size=70)
+            ).pack(pady=(50, 15))
+
+            ctk.CTkLabel(
+                empty_panel,
+                text="Vui lòng đăng nhập",
+                font=ctk.CTkFont(size=22, weight="bold"),
+                text_color=T.TEXT
+            ).pack()
+
+            ctk.CTkLabel(
+                empty_panel,
+                text="Hệ thống cần xác thực tài khoản để lấy dữ liệu lịch sử học tập của bạn.",
+                text_color=T.MUTED,
+                font=ctk.CTkFont(size=14)
+            ).pack(pady=(10, 25))
+
+            def do_login():
+                self.show_auth_panel(return_page=self.show_recent_words)
+
+            ctk.CTkButton(
+                empty_panel,
+                text="Đăng nhập ngay",
+                font=ctk.CTkFont(size=15, weight="bold"),
+                fg_color=T.BLUE,
+                hover_color=T.BLUE_DARK,
+                height=45,
+                command=do_login
+            ).pack(pady=(0, 50))
+
+            return
+
+        # BÍ KÍP 4: Xử lý giao diện cho trạng thái CHƯA HỌC TỪ NÀO
+        if not learned:
+            empty_panel = ctk.CTkFrame(main, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
+            empty_panel.pack(fill="x", pady=20)
+            ctk.CTkLabel(empty_panel, text="📭", font=ctk.CTkFont(size=70)).pack(pady=(50, 15))
+            ctk.CTkLabel(empty_panel, text="Chưa có dữ liệu", font=ctk.CTkFont(size=22, weight="bold"), text_color=T.TEXT).pack()
+            ctk.CTkLabel(empty_panel, text="Bạn chưa hoàn thành bài học nào. Hãy quay lại Bảng chữ cái để bắt đầu nhé!", text_color=T.MUTED, font=ctk.CTkFont(size=14)).pack(pady=(10, 25))
+            ctk.CTkButton(empty_panel, text="Đến Bảng chữ cái", font=ctk.CTkFont(size=15, weight="bold"), fg_color=T.BLUE, height=45, command=self.show_alphabet).pack(pady=(0, 50))
+            return
+
+        # Xử lý Logic Hiển thị danh sách từ đã học
+        recent_words = learned.copy()
+        recent_words.reverse() # Lật ngược mảng để từ mới học nằm trên cùng
+        
+        # Thanh Công cụ (Action Bar)
+        action_bar = ctk.CTkFrame(main, fg_color="transparent")
+        action_bar.pack(fill="x", pady=(0, 25))
+        
+        top_5 = recent_words[:5]
+        btn_text = f"▶ Ôn tập {len(top_5)} từ gần nhất"
+        
+        # BÍ KÍP 3: Bơm định tuyến (back_cmd) cho luồng học liên hoàn
+        ctk.CTkButton(action_bar, text=btn_text, font=ctk.CTkFont(size=15, weight="bold"), height=45, fg_color=T.BLUE, hover_color=T.BLUE_DARK, command=lambda: self.show_camera_practice(pair_list=top_5, back_cmd=self.show_recent_words)).pack(side="left")
+        
+        ctk.CTkLabel(action_bar, text=f"Tổng cộng: {len(recent_words)} từ đã học", font=ctk.CTkFont(size=14, weight="bold"), text_color=T.GREEN).pack(side="right", pady=10)
+
+        # Vẽ lưới (Grid) 4 cột để chứa thẻ từ vựng
+        grid = ctk.CTkFrame(main, fg_color="transparent")
+        grid.pack(fill="both", expand=True)
+        for c in range(4):
+            grid.grid_columnconfigure(c, weight=1)
+
+        for i, letter in enumerate(recent_words):
+            r, c = divmod(i, 4)
+            self.recent_word_card(grid, r, c, letter)
+
+    def recent_word_card(self, parent, row, col, letter):
+        lesson = self.get_lesson(letter)
+        card = ctk.CTkFrame(parent, fg_color=T.CARD, border_width=1, border_color=T.BORDER, corner_radius=14)
+        card.grid(row=row, column=col, sticky="nsew", padx=(0 if col == 0 else 16, 0), pady=(0 if row == 0 else 16, 0))
+        
+        img_container = ctk.CTkFrame(card, fg_color="transparent")
+        img_container.pack(fill="x", padx=16, pady=(16, 5))
+        
+        img_label = self.create_lesson_image_label(img_container, lesson, size=(120, 120), height=130, fallback_font_size=60)
+        img_label.configure(fg_color="#0B1520", corner_radius=12)
+        img_label.pack(fill="x")
+        
+        title_text = self.lesson_title_text(lesson)
+        ctk.CTkLabel(card, text=title_text, font=ctk.CTkFont(size=17, weight="bold"), text_color=T.TEXT).pack(pady=(10, 0))
+        
+        # BÍ KÍP 4: Bơm định tuyến (back_cmd) cho luồng học từ đơn lẻ
+        btn = ctk.CTkButton(card, text="▶ Ôn lại", font=ctk.CTkFont(weight="bold"), height=38, fg_color=T.PANEL, border_width=1, border_color=T.BORDER, hover_color=T.CARD_HOVER, text_color=T.BLUE, command=lambda: self.show_camera_practice(letter, back_cmd=self.show_recent_words))
+        btn.pack(fill="x", padx=16, pady=(12, 16))
+    def show_reaction_training(self):
+        """Luyện phản xạ: app ra ký hiệu ngẫu nhiên, người học phải làm nhanh trước camera."""
+        import os
+        import random
+        import sys
+        import time
+        from tkinter import messagebox
+
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        self.refresh_account_button()
+
+        # ---------- 1) NẠP DỮ LIỆU THẬT TỪ TÀI KHOẢN + DATA BÀI HỌC ----------
+        auth_module = None
+        for name, module in list(sys.modules.items()):
+            if name == "auth_ui" or name.endswith(".auth_ui"):
+                auth_module = module
+                break
+
+        if auth_module is None:
+            try:
+                import auth_ui
+                auth_module = auth_ui
+            except Exception:
+                auth_module = None
+
+        is_logged_in = bool(auth_module and getattr(auth_module, "CURRENT_USER", None))
+        learned = list(getattr(auth_module, "LEARNED_LETTERS", []) or []) if auth_module else []
+
+        all_signs = []
+        for item in ALPHABET or []:
+            if isinstance(item, dict):
+                val = item.get("label") or item.get("NhanHienThi") or item.get("title") or item.get("TieuDe")
+            else:
+                val = item
+
+            val = str(val or "").replace("Chữ ", "", 1).strip().upper()
+
+            # Không đưa các mã dấu riêng DAU_ vào luyện phản xạ chính.
+            # Chữ có dấu như Ă, Â, Ê, Ô, Ơ, Ư vẫn được giữ.
+            if val and val not in all_signs and not val.startswith("DAU_"):
+                all_signs.append(val)
+
+        if not all_signs:
+            all_signs = [
+                "A", "B", "C", "D", "Đ", "E", "G", "H", "I", "K", "L", "M",
+                "N", "O", "P", "Q", "R", "S", "T", "U", "V", "X", "Y"
+            ]
+
+        clean_learned = []
+        for val in learned:
+            val = str(val or "").replace("Chữ ", "", 1).strip().upper()
+            if val and val not in clean_learned:
+                clean_learned.append(val)
+                if val not in all_signs:
+                    all_signs.append(val)
+
+        # Ưu tiên ký hiệu đã học. Nếu chưa có thì dùng toàn bộ dữ liệu bảng chữ cái.
+        pool = clean_learned[:] if clean_learned else all_signs[:]
+        random.shuffle(pool)
+
+        if len(pool) < 10:
+            extra = [x for x in all_signs if x not in pool]
+            random.shuffle(extra)
+            pool.extend(extra[:10 - len(pool)])
+
+        targets = pool[:min(10, len(pool))]
+
+        if not targets:
+            messagebox.showinfo("Luyện phản xạ", "Chưa có dữ liệu ký hiệu để luyện tập.")
+            return
+
+        # ---------- 2) TRẠNG THÁI PHIÊN LUYỆN ----------
+        self.reaction_targets = targets
+        self.reaction_results = []
+        self.reaction_index = 0
+        self.reaction_round_started = False
+        self.reaction_round_start = None
+        self.reaction_session_start = time.time()
+        self.reaction_time_limit = 4.0
+        self.reaction_success_frames = 0
+        self.reaction_best_confidence = 0.0
+
+
+        self.sequence_data = []
+        self.prev_wx = None
+        self.prev_wy = None
+        self.ai_session = None
+        self.ai_labels = None
+        self.mp_hands = None
+        self.mp_draw = None
+
+        page = self._clear_page()
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_rowconfigure(0, weight=1)
+
+        wrapper = ctk.CTkFrame(page, fg_color=T.BG)
+        wrapper.pack(fill="both", expand=True, padx=30, pady=30)
+
+        header = ctk.CTkFrame(wrapper, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 18))
+
+        title_box = ctk.CTkFrame(header, fg_color="transparent")
+        title_box.pack(side="left")
+
+        self._title(
+            title_box,
+            "LUYỆN PHẢN XẠ",
+            f"Thực hiện nhanh {len(targets)} ký hiệu trước camera"
+        )
+
+        def safe_stop():
+            self.practice_camera_on = False
+
+            if self.practice_after_id is not None:
+                try:
+                    self.after_cancel(self.practice_after_id)
+                except Exception:
+                    pass
+                self.practice_after_id = None
+
+            if self.practice_cap is not None:
+                try:
+                    self.practice_cap.release()
+                except Exception:
+                    pass
+                self.practice_cap = None
+
+        def go_back():
+            safe_stop()
+            self.show_review()
+
+        self.back_button(header, command=go_back, text="←  Trở về").pack(
+            side="right",
+            anchor="n",
+            pady=6
+        )
+
+        
+
+        body = ctk.CTkFrame(wrapper, fg_color="transparent")
+        body.pack(fill="both", expand=True)
+
+        # ---------- CỘT TRÁI: CAMERA ----------
+        left_frame = ctk.CTkFrame(
+            body,
+            fg_color=T.PANEL,
+            corner_radius=16,
+            border_width=1,
+            border_color=T.BORDER
+        )
+        left_frame.pack(side="left", fill="both", expand=True)
+        left_frame.grid_rowconfigure(1, weight=1)
+        left_frame.grid_columnconfigure(0, weight=1)
+
+        cam_bar = ctk.CTkFrame(left_frame, fg_color="transparent")
+        cam_bar.grid(row=0, column=0, sticky="ew", padx=20, pady=15)
+
+        self.practice_status_label = ctk.CTkLabel(
+            cam_bar,
+            text="● Camera đang tắt",
+            fg_color="#2A2F35",
+            corner_radius=8,
+            text_color=T.MUTED,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            padx=12,
+            pady=6,
+        )
+        self.practice_status_label.pack(side="left")
+
+        reaction_hint_label = ctk.CTkLabel(
+            cam_bar,
+            text="Mẹo: đưa tay vào khung, làm đúng và giữ ổn định thật nhanh.",
+            text_color=T.MUTED,
+            font=ctk.CTkFont(size=13),
+        )
+        reaction_hint_label.pack(side="right")
+
+        # ==========================================
+        # BÍ KÍP 1: KHÓA CỨNG KÍCH THƯỚC KHUNG CAMERA PHẢN XẠ
+        # ==========================================
+        REACTION_CAMERA_W = 720
+        REACTION_CAMERA_H = 430
+
+        camera_view = ctk.CTkFrame(
+            left_frame,
+            width=REACTION_CAMERA_W,
+            height=REACTION_CAMERA_H,
+            fg_color="#080C11",
+            corner_radius=12
+        )
+        camera_view.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
+        camera_view.grid_propagate(False)
+
+        camera_view.grid_rowconfigure(0, weight=1)
+        camera_view.grid_columnconfigure(0, weight=1)
+
+        self.practice_video_label = ctk.CTkLabel(
+            camera_view,
+            text="⚡\n\nNhấn 'Bắt đầu phản xạ' để mở camera",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            text_color=T.MUTED_2,
+        )
+        self.practice_video_label.grid(row=0, column=0, sticky="nsew")
+
+        # ---------- CỘT PHẢI: THỬ THÁCH ----------
+        right_frame = ctk.CTkFrame(body, fg_color="transparent", width=430)
+        right_frame.pack(side="right", fill="y", padx=(25, 0))
+        right_frame.pack_propagate(False)
+
+        target_panel = ctk.CTkFrame(
+            right_frame,
+            fg_color=T.PANEL,
+            corner_radius=16,
+            border_width=1,
+            border_color=T.BORDER
+        )
+        target_panel.pack(fill="x", pady=(0, 15))
+
+        top_row = ctk.CTkFrame(target_panel, fg_color="transparent")
+        top_row.pack(fill="x", padx=20, pady=(18, 8))
+
+        self.reaction_question_label = ctk.CTkLabel(
+            top_row,
+            text=f"0 / {len(targets)}",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=T.MUTED,
+        )
+        self.reaction_question_label.pack(side="left")
+
+        self.reaction_score_label = ctk.CTkLabel(
+            top_row,
+            text="Đúng: 0",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=T.GREEN,
+        )
+        self.reaction_score_label.pack(side="right")
+
+        ctk.CTkLabel(
+            target_panel,
+            text="Ký hiệu cần làm",
+            font=ctk.CTkFont(size=14),
+            text_color=T.MUTED,
+        ).pack(pady=(4, 2))
+
+        self.reaction_target_label = ctk.CTkLabel(
+            target_panel,
+            text="Sẵn sàng",
+            font=ctk.CTkFont(size=28, weight="bold"),
+            text_color=T.MUTED,
+        )
+        self.reaction_target_label.pack(pady=(0, 10))
+
+        self.reaction_img_box = ctk.CTkFrame(target_panel, fg_color="transparent")
+        self.reaction_img_box.pack(fill="x", padx=20, pady=(0, 15))
+        ctk.CTkLabel(
+            self.reaction_img_box,
+            text="⚡\nChờ bắt đầu",
+            height=130,
+            fg_color="#0E1722",
+            corner_radius=14,
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=T.MUTED,
+        ).pack(fill="x")
+        self.reaction_timer_label = ctk.CTkLabel(
+            target_panel,
+            text="--",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            text_color=T.MUTED,
+        )
+        self.reaction_timer_label.pack(pady=(0, 8))
+
+        self.reaction_timer_bar = ctk.CTkProgressBar(
+            target_panel,
+            height=9,
+            progress_color=T.BLUE,
+            fg_color="#2A3038"
+        )
+        self.reaction_timer_bar.pack(fill="x", padx=20, pady=(0, 20))
+        self.reaction_timer_bar.set(0)
+
+        feedback_panel = ctk.CTkFrame(
+            right_frame,
+            fg_color=T.PANEL,
+            corner_radius=16,
+            border_width=1,
+            border_color=T.BORDER
+        )
+        feedback_panel.pack(fill="x", pady=(0, 15))
+
+        row_pred = ctk.CTkFrame(feedback_panel, fg_color="transparent")
+        row_pred.pack(fill="x", padx=20, pady=(18, 6))
+
+        ctk.CTkLabel(
+            row_pred,
+            text="Bạn đang làm:",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            text_color=T.TEXT
+        ).pack(side="left")
+
+        self.reaction_pred_label = ctk.CTkLabel(
+            row_pred,
+            text="--",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=T.TEXT
+        )
+        self.reaction_pred_label.pack(side="right")
+
+        row_conf = ctk.CTkFrame(feedback_panel, fg_color="transparent")
+        row_conf.pack(fill="x", padx=20, pady=(4, 8))
+
+        ctk.CTkLabel(
+            row_conf,
+            text="Độ khớp:",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            text_color=T.TEXT
+        ).pack(side="left")
+
+        self.reaction_conf_label = ctk.CTkLabel(
+            row_conf,
+            text="0%",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=T.BLUE
+        )
+        self.reaction_conf_label.pack(side="right")
+
+        self.reaction_conf_bar = ctk.CTkProgressBar(
+            feedback_panel,
+            height=8,
+            progress_color=T.BLUE,
+            fg_color="#2A3038"
+        )
+        self.reaction_conf_bar.pack(fill="x", padx=20, pady=(0, 14))
+        self.reaction_conf_bar.set(0)
+
+        self.reaction_feedback_label = ctk.CTkLabel(
+            feedback_panel,
+            text="☆ Sẵn sàng chưa? Nhấn bắt đầu để luyện phản xạ.",
+            fg_color="#2A2F35",
+            corner_radius=8,
+            height=45,
+            text_color=T.MUTED,
+            font=ctk.CTkFont(size=13),
+            wraplength=350,
+        )
+        self.reaction_feedback_label.pack(fill="x", padx=20, pady=(0, 18))
+        # ==========================
+        # THANH ĐIỀU KHIỂN - ĐƯA XUỐNG DƯỚI CÙNG
+        # ==========================
+        control_bar = ctk.CTkFrame(
+            wrapper,
+            fg_color=T.PANEL,
+            corner_radius=18,
+            border_width=1,
+            border_color=T.BORDER
+        )
+        control_bar.pack(side="bottom", fill="x", pady=(18, 0))
+        control_bar.grid_columnconfigure(0, weight=1)
+        control_bar.grid_columnconfigure(1, weight=0)
+
+        control_left = ctk.CTkFrame(control_bar, fg_color="transparent")
+        control_left.grid(row=0, column=0, sticky="ew", padx=22, pady=16)
+
+        ctk.CTkLabel(
+            control_left,
+            text="⚡  Sẵn sàng luyện phản xạ?",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=T.TEXT
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            control_left,
+            text=(
+                "Bấm bắt đầu → hệ thống đếm ngược 3 giây → hiện ký hiệu bất ngờ. "
+                "Bạn cần làm đúng trước khi hết 4 giây."
+            ),
+            font=ctk.CTkFont(size=13),
+            text_color=T.MUTED,
+            wraplength=760,
+            justify="left"
+        ).pack(anchor="w", pady=(5, 0))
+
+        mini_stats = ctk.CTkFrame(control_left, fg_color="transparent")
+        mini_stats.pack(anchor="w", pady=(12, 0))
+
+        for text, color in [
+            (f"{len(targets)} lượt", T.BLUE),
+            ("4 giây / lượt", T.ORANGE),
+            ("Tính vào độ chính xác TB", T.GREEN if is_logged_in else T.MUTED),
+        ]:
+            ctk.CTkLabel(
+                mini_stats,
+                text=text,
+                fg_color="#132033",
+                corner_radius=8,
+                text_color=color,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                padx=10,
+                pady=5
+            ).pack(side="left", padx=(0, 8))
+
+        start_btn = ctk.CTkButton(
+            control_bar,
+            text="▶  Bắt đầu phản xạ",
+            width=230,
+            height=58,
+            fg_color=T.ORANGE,
+            hover_color="#D98200",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            corner_radius=16,
+        )
+        start_btn.grid(row=0, column=1, sticky="e", padx=22, pady=16)
+
+        def render_target_preview():
+            for child in self.reaction_img_box.winfo_children():
+                child.destroy()
+
+            target = self.reaction_targets[self.reaction_index]
+
+            composite_map = {
+                "Ă": "DAU_A",
+                "Â": "DAU_MU",
+                "Ê": "DAU_MU",
+                "Ô": "DAU_MU",
+                "Ơ": "DAU_MOC",
+                "Ư": "DAU_MOC",
+            }
+
+            if target in composite_map:
+                row = ctk.CTkFrame(self.reaction_img_box, fg_color="transparent")
+                row.pack(anchor="center")
+
+                base = self.create_lesson_image_label(
+                    row,
+                    self.get_lesson(target),
+                    size=(95, 95),
+                    height=105,
+                    fallback_font_size=52
+                )
+                base.configure(fg_color="#0E1722", corner_radius=12)
+                base.pack(side="left", padx=6)
+
+                mark = self.create_lesson_image_label(
+                    row,
+                    {"label": composite_map[target]},
+                    size=(95, 95),
+                    height=105,
+                    fallback_font_size=52
+                )
+                mark.configure(fg_color="#0E1722", corner_radius=12)
+                mark.pack(side="left", padx=6)
+            else:
+                img = self.create_lesson_image_label(
+                    self.reaction_img_box,
+                    self.get_lesson(target),
+                    size=(95, 95),
+                    height=130,
+                    fallback_font_size=70
+                )
+                img.configure(fg_color="#0E1722", corner_radius=14)
+                img.pack(fill="x")
+        def set_waiting_target_ui(message="Chờ bắt đầu"):
+            for child in self.reaction_img_box.winfo_children():
+                child.destroy()
+
+            ctk.CTkLabel(
+                self.reaction_img_box,
+                text=f"⚡\n{message}",
+                height=105,
+                fg_color="#0E1722",
+                corner_radius=14,
+                font=ctk.CTkFont(size=18, weight="bold"),
+                text_color=T.MUTED,
+            ).pack(fill="x")
+
+            self.reaction_target_label.configure(
+                text="Sẵn sàng",
+                text_color=T.MUTED
+            )
+
+            self.reaction_timer_label.configure(
+                text="--",
+                text_color=T.MUTED
+            )
+
+            self.reaction_timer_bar.configure(progress_color=T.BLUE)
+            self.reaction_timer_bar.set(0)
+
+            self.reaction_pred_label.configure(
+                text="--",
+                text_color=T.TEXT
+            )
+
+            self.reaction_conf_label.configure(
+                text="0%",
+                text_color=T.BLUE
+            )
+
+            self.reaction_conf_bar.configure(progress_color=T.BLUE)
+            self.reaction_conf_bar.set(0)
+
+
+        def begin_start_countdown(number=3):
+            if not self.practice_camera_on:
+                return
+
+            if number <= 0:
+                start_round()
+                return
+
+            for child in self.reaction_img_box.winfo_children():
+                child.destroy()
+
+            ctk.CTkLabel(
+                self.reaction_img_box,
+                text=str(number),
+                height=105,
+                fg_color="#0E1722",
+                corner_radius=14,
+                font=ctk.CTkFont(size=60, weight="bold"),
+                text_color=T.ORANGE,
+            ).pack(fill="x")
+
+            self.reaction_target_label.configure(
+                text="Chuẩn bị",
+                text_color=T.ORANGE
+            )
+
+            self.reaction_timer_label.configure(
+                text=str(number),
+                text_color=T.ORANGE
+            )
+
+            self.reaction_timer_bar.configure(progress_color=T.ORANGE)
+            self.reaction_timer_bar.set(number / 3)
+
+            self.reaction_feedback_label.configure(
+                text="☆ Chuẩn bị nhìn ký hiệu và làm thật nhanh!",
+                fg_color="#332200",
+                text_color=T.ORANGE
+            )
+
+            self.after(1000, lambda: begin_start_countdown(number - 1))
+        def add_history_row(target, ok, reaction_time, confidence):
+            return
+
+        def update_header_stats():
+            correct = sum(1 for r in self.reaction_results if r["correct"])
+            self.reaction_score_label.configure(text=f"Đúng: {correct}")
+
+            current_no = min(self.reaction_index + 1, len(self.reaction_targets))
+            self.reaction_question_label.configure(
+                text=f"Câu {current_no} / {len(self.reaction_targets)}"
+            )
+
+        def show_result_page():
+            safe_stop()
+
+            total = len(self.reaction_results) or len(self.reaction_targets)
+            correct = sum(1 for r in self.reaction_results if r["correct"])
+            accuracy = int((correct / total) * 100) if total else 0
+
+            correct_times = [
+                r["reaction_time"]
+                for r in self.reaction_results
+                if r["correct"] and r["reaction_time"] is not None
+            ]
+            avg_time = sum(correct_times) / len(correct_times) if correct_times else 0
+            session_minutes = max(1, int((time.time() - self.reaction_session_start) / 60))
+
+            # Lưu vào dữ liệu thật:
+            # Độ chính xác TB chỉ lấy đúng/sai, không trộn tốc độ phản xạ.
+            try:
+                import user_db
+
+                if is_logged_in and auth_module and getattr(auth_module, "CURRENT_USER", None):
+                    updated = user_db.update_study_stats(
+                        auth_module.CURRENT_USER["id"],
+                        accuracy,
+                        session_time_minutes=session_minutes,
+                    )
+                    if updated:
+                        auth_module.CURRENT_USER.update(updated)
+            except Exception as e:
+                print("[Luyện phản xạ] Không lưu được thống kê:", e)
+
+            result_page = self._clear_page()
+            result_page.grid_columnconfigure(0, weight=1)
+            result_page.grid_rowconfigure(0, weight=1)
+
+            card = ctk.CTkFrame(
+                result_page,
+                fg_color=T.PANEL,
+                corner_radius=20,
+                border_width=1,
+                border_color=T.BORDER
+            )
+            card.grid(row=0, column=0, sticky="nsew", padx=150, pady=70)
+            card.grid_columnconfigure(0, weight=1)
+
+            icon = "⚡" if accuracy >= 70 else "💪"
+            color = T.GREEN if accuracy >= 80 else T.BLUE if accuracy >= 50 else T.ORANGE
+            title = (
+                "PHẢN XẠ RẤT TỐT!"
+                if accuracy >= 80
+                else "KHÁ ỔN RỒI!"
+                if accuracy >= 50
+                else "CẦN LUYỆN THÊM!"
+            )
+
+            ctk.CTkLabel(card, text=icon, font=ctk.CTkFont(size=110)).pack(pady=(45, 15))
+
+            ctk.CTkLabel(
+                card,
+                text=title,
+                font=ctk.CTkFont(size=31, weight="bold"),
+                text_color=color
+            ).pack(pady=(0, 10))
+
+            ctk.CTkLabel(
+                card,
+                text=f"Bạn làm đúng {correct} / {total} ký hiệu.",
+                font=ctk.CTkFont(size=18),
+                text_color=T.MUTED
+            ).pack(pady=(0, 25))
+
+            stats = ctk.CTkFrame(card, fg_color="#080C11", corner_radius=16)
+            stats.pack(pady=(0, 28), padx=50, fill="x")
+            stats.grid_columnconfigure((0, 1, 2), weight=1)
+
+            for i, (label, value, c) in enumerate([
+                ("Độ chính xác", f"{accuracy}%", color),
+                ("Phản xạ TB", f"{avg_time:.2f}s" if avg_time else "--", T.ORANGE),
+                ("Thời gian học", f"{session_minutes} phút", T.BLUE),
+            ]):
+                cell = ctk.CTkFrame(stats, fg_color="transparent")
+                cell.grid(row=0, column=i, sticky="nsew", padx=15, pady=18)
+
+                ctk.CTkLabel(
+                    cell,
+                    text=label,
+                    font=ctk.CTkFont(size=14),
+                    text_color=T.MUTED
+                ).pack()
+
+                ctk.CTkLabel(
+                    cell,
+                    text=value,
+                    font=ctk.CTkFont(size=30, weight="bold"),
+                    text_color=c
+                ).pack(pady=(4, 0))
+
+            mistakes = [r["target"] for r in self.reaction_results if not r["correct"]]
+
+            mistakes = [r["target"] for r in self.reaction_results if not r["correct"]]
+
+            # ==========================================
+            # BÍ KÍP 3: THÔNG BÁO GHI NHẬN ĐIỂM SỐ RÕ RÀNG THEO TRẠNG THÁI
+            # ==========================================
+            if is_logged_in:
+                note = "✓ Kết quả đã được ghi nhận và tính vào Độ chính xác TB."
+                note_color = T.GREEN
+            else:
+                note = "⚠ Vui lòng đăng nhập để lưu kết quả!"
+                note_color = T.ORANGE
+
+            if mistakes:
+                note += "\nKý hiệu nên ôn lại: " + ", ".join(mistakes[:6])
+
+            ctk.CTkLabel(
+                card,
+                text=note,
+                font=ctk.CTkFont(size=15, weight="bold"), # In đậm lên cho dễ chú ý
+                text_color=note_color, # Đổi màu linh hoạt (Xanh lá / Cam)
+                justify="center",
+                wraplength=650
+            ).pack(pady=(0, 28))
+
+            btns = ctk.CTkFrame(card, fg_color="transparent")
+            btns.pack()
+
+            ctk.CTkButton(
+                btns,
+                text="⟳ Luyện lại",
+                height=50,
+                width=180,
+                fg_color=T.CARD,
+                hover_color=T.CARD_HOVER,
+                border_width=1,
+                border_color=T.BORDER,
+                font=ctk.CTkFont(size=16, weight="bold"),
+                command=self.show_reaction_training
+            ).pack(side="left", padx=10)
+
+            ctk.CTkButton(
+                btns,
+                text="← Trở về Ôn tập",
+                height=50,
+                width=180,
+                fg_color=T.BLUE,
+                hover_color=T.BLUE_DARK,
+                font=ctk.CTkFont(size=16, weight="bold"),
+                command=self.show_review
+            ).pack(side="left", padx=10)
+
+        def finish_round(ok, confidence):
+            if not self.reaction_round_started:
+                return
+
+            target = self.reaction_targets[self.reaction_index]
+            reaction_time = time.time() - self.reaction_round_start if ok else None
+
+            self.reaction_results.append({
+                "target": target,
+                "correct": bool(ok),
+                "reaction_time": reaction_time,
+                "confidence": confidence,
+            })
+
+            add_history_row(target, ok, reaction_time, confidence)
+            update_header_stats()
+
+            self.reaction_round_started = False
+            self.reaction_success_frames = 0
+            self.sequence_data.clear()
+            self.prev_wx, self.prev_wy = None, None
+
+            if ok:
+                self.reaction_feedback_label.configure(
+                    text="☆ Chính xác! Chuyển sang ký hiệu tiếp theo...",
+                    fg_color="#17351F",
+                    text_color=T.GREEN
+                )
+            else:
+                self.reaction_feedback_label.configure(
+                    text=f"☆ Quá giờ! Đáp án là chữ {target}.",
+                    fg_color="#451A1F",
+                    text_color=T.RED
+                )
+
+            self.reaction_index += 1
+
+            if self.reaction_index >= len(self.reaction_targets):
+                self.after(1000, show_result_page)
+            else:
+                self.after(900, start_round)
+
+        def start_round():
+            if self.reaction_index >= len(self.reaction_targets):
+                show_result_page()
+                return
+
+            target = self.reaction_targets[self.reaction_index]
+
+            self.reaction_round_started = True
+            self.reaction_round_start = time.time()
+            self.reaction_success_frames = 0
+            self.reaction_best_confidence = 0.0
+
+            self.sequence_data.clear()
+            self.prev_wx, self.prev_wy = None, None
+
+            self.reaction_target_label.configure(text=f"Chữ {target}")
+            self.reaction_pred_label.configure(text="--", text_color=T.TEXT)
+            self.reaction_conf_label.configure(text="0%", text_color=T.BLUE)
+            self.reaction_conf_bar.configure(progress_color=T.BLUE)
+            self.reaction_conf_bar.set(0)
+            self.reaction_timer_bar.configure(progress_color=T.BLUE)
+            self.reaction_timer_bar.set(1)
+            self.reaction_timer_label.configure(text="04.0s", text_color=T.BLUE)
+            self.reaction_feedback_label.configure(
+                text="☆ Làm ký hiệu này càng nhanh càng tốt!",
+                fg_color="#102034",
+                text_color=T.BLUE
+            )
+
+            render_target_preview()
+            update_header_stats()
+
+        def load_ai_dependencies():
+            try:
+                import mediapipe as mp
+
+                # BÍ KÍP 1: Tái sử dụng MediaPipe, tuyệt đối không đóng/mở lại gây kẹt RAM
+                if self.mp_hands is None:
+                    self.mp_hands = mp.solutions.hands.Hands(
+                        static_image_mode=False,
+                        max_num_hands=2,
+                        min_detection_confidence=0.7,
+                    )
+                    self.mp_draw = mp.solutions.drawing_utils
+            except Exception as e:
+                print("[Luyện phản xạ] Lỗi load MediaPipe:", e)
+                return False
+
+            try:
+                import numpy as np
+                import onnxruntime as ort
+
+                # Tái sử dụng Model AI
+                if self.ai_session is None:
+                    root = self._asset_project_root()
+                    model_path = os.path.join(root, "model", "model.onnx")
+                    labels_path = os.path.join(root, "model", "labels.npy")
+
+                    if not os.path.exists(model_path):
+                        model_path = os.path.join("model", "model.onnx")
+                    if not os.path.exists(labels_path):
+                        labels_path = os.path.join("model", "labels.npy")
+
+                    if os.path.exists(model_path) and os.path.exists(labels_path):
+                        self.ai_session = ort.InferenceSession(
+                            model_path,
+                            providers=["CPUExecutionProvider"]
+                        )
+                        self.ai_labels = np.load(labels_path)
+                    else:
+                        from tkinter import messagebox
+                        messagebox.showerror(
+                            "Lỗi AI",
+                            "Không tìm thấy model/model.onnx hoặc model/labels.npy."
+                        )
+                        return False
+            except Exception as e:
+                from tkinter import messagebox
+                messagebox.showerror("Lỗi AI", f"Không tải được mô hình AI: {e}")
+                return False
+
+            return True
+
+        def hand_vectorlize(landmarks, hand_type, prev_wx, prev_wy):
+            import numpy as np
+
+            wx, wy = landmarks[0].x, landmarks[0].y
+            vector = []
+
+            for i in range(1, 21):
+                x = landmarks[i].x - wx
+                y = landmarks[i].y - wy
+                vector.extend([x, y])
+
+            if prev_wx is None or prev_wy is None:
+                delta_x = 0.0
+                delta_y = 0.0
+            else:
+                delta_x = wx - prev_wx
+                delta_y = wy - prev_wy
+
+            if abs(delta_x) < 0.008:
+                delta_x = 0.0
+            if abs(delta_y) < 0.008:
+                delta_y = 0.0
+
+            delta_x *= 30
+            delta_y *= 30
+
+            vector.extend([hand_type, delta_x, delta_y])
+            return np.array(vector), wx, wy
+
+        def update_reaction_frame():
+            if not self.practice_camera_on or self.practice_cap is None:
+                return
+
+            try:
+                import cv2
+                import mediapipe as mp
+                import numpy as np
+                from PIL import Image
+
+                success, frame = self.practice_cap.read()
+
+                if success:
+                    frame = cv2.flip(frame, 1)
+                    h, w = frame.shape[:2]
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                    hand_detected = False
+                    predicted_char = ""
+                    target_confidence = 0.0
+
+                    current_target = (
+                        self.reaction_targets[self.reaction_index]
+                        if self.reaction_index < len(self.reaction_targets)
+                        else ""
+                    )
+
+                    if self.mp_hands is not None:
+                        results = self.mp_hands.process(frame_rgb)
+
+                        if results.multi_hand_landmarks:
+                            hand_detected = True
+
+                            for hand_landmarks, handedness in zip(
+                                results.multi_hand_landmarks,
+                                results.multi_handedness
+                            ):
+                                self.mp_draw.draw_landmarks(
+                                    frame,
+                                    hand_landmarks,
+                                    mp.solutions.hands.HAND_CONNECTIONS
+                                )
+
+                                label_hand = handedness.classification[0].label
+                                hand_type = 0 if label_hand == "Left" else 1
+
+                                vector, self.prev_wx, self.prev_wy = hand_vectorlize(
+                                    hand_landmarks.landmark,
+                                    hand_type,
+                                    self.prev_wx,
+                                    self.prev_wy
+                                )
+
+                                self.sequence_data.append(vector)
+
+                                if len(self.sequence_data) > 30:
+                                    self.sequence_data.pop(0)
+
+                                if len(self.sequence_data) == 30 and self.ai_session is not None:
+                                    try:
+                                        input_data = np.expand_dims(
+                                            self.sequence_data,
+                                            axis=0
+                                        ).astype(np.float32)
+
+                                        input_name = self.ai_session.get_inputs()[0].name
+                                        out = self.ai_session.run(None, {input_name: input_data})[0][0]
+
+                                        max_prob, max_index = np.max(out), np.argmax(out)
+
+                                        if max_prob > 0.5:
+                                            predicted_char = str(self.ai_labels[max_index]).upper()
+
+                                        for idx, lbl in enumerate(self.ai_labels):
+                                            if str(lbl).upper() == current_target.upper():
+                                                target_confidence = float(out[idx])
+                                                break
+                                    except Exception:
+                                        pass
+                        else:
+                            self.sequence_data.clear()
+                            self.prev_wx, self.prev_wy = None, None
+                    if not self.reaction_round_started:
+                        target_confidence = 0.0
+                        predicted_char = ""
+                        self.reaction_success_frames = 0
+                    if target_confidence > self.reaction_best_confidence:
+                        self.reaction_best_confidence = target_confidence
+
+                    if hand_detected:
+                        if target_confidence >= 0.8:
+                            ui_color = T.GREEN
+                            bgr_color = (0, 200, 0)
+                            self.reaction_success_frames += 1
+                        elif target_confidence >= 0.4:
+                            ui_color = T.YELLOW
+                            bgr_color = (0, 215, 255)
+                            self.reaction_success_frames = 0
+                        else:
+                            ui_color = T.ORANGE
+                            bgr_color = (0, 140, 255)
+                            self.reaction_success_frames = 0
+
+                        self.reaction_conf_bar.configure(progress_color=ui_color)
+                        self.reaction_conf_bar.set(target_confidence)
+
+                        self.reaction_conf_label.configure(
+                            text=f"{int(target_confidence * 100)}%",
+                            text_color=ui_color
+                        )
+
+                        self.reaction_pred_label.configure(
+                            text=predicted_char or "--",
+                            text_color=ui_color if predicted_char == current_target else T.ORANGE
+                        )
+
+                        cv2.putText(
+                            frame,
+                            f"Target: {current_target} | {int(target_confidence * 100)}%",
+                            (18, 36),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8,
+                            bgr_color,
+                            2
+                        )
+                    else:
+                        self.reaction_success_frames = 0
+                        self.reaction_conf_bar.configure(progress_color=T.BLUE)
+                        self.reaction_conf_bar.set(0)
+
+                        self.reaction_conf_label.configure(
+                            text="0%",
+                            text_color=T.BLUE
+                        )
+
+                        self.reaction_pred_label.configure(
+                            text="--",
+                            text_color=T.TEXT
+                        )
+
+                    if self.reaction_round_started:
+                        elapsed = time.time() - self.reaction_round_start
+                        remain = max(0.0, self.reaction_time_limit - elapsed)
+                        ratio = remain / self.reaction_time_limit
+
+                        timer_color = (
+                            T.GREEN
+                            if ratio > 0.55
+                            else T.YELLOW
+                            if ratio > 0.25
+                            else T.RED
+                        )
+
+                        self.reaction_timer_bar.configure(progress_color=timer_color)
+                        self.reaction_timer_bar.set(ratio)
+
+                        self.reaction_timer_label.configure(
+                            text=f"{remain:04.1f}s",
+                            text_color=timer_color
+                        )
+
+                        if self.reaction_success_frames >= 8:
+                            finish_round(True, target_confidence)
+                        elif remain <= 0:
+                            finish_round(False, self.reaction_best_confidence)
+
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                    # ==========================================
+                    # BÍ KÍP 2: RENDER CAMERA THEO TỶ LỆ CHUẨN, KHÔNG BỊ ZOOM
+                    # ==========================================
+                    display_w = 720
+                    display_h = 430
+
+                    scale = min(display_w / w, display_h / h)
+                    new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+
+                    frame_resized = cv2.resize(
+                        frame_rgb,
+                        (new_w, new_h),
+                        interpolation=cv2.INTER_AREA
+                    )
+
+                    img = Image.fromarray(frame_resized)
+                    imgtk = ctk.CTkImage(
+                        light_image=img,
+                        dark_image=img,
+                        size=(new_w, new_h)
+                    )
+
+                    self.practice_video_label.configure(image=imgtk, text="")
+                    self.practice_video_label.image = imgtk
+
+            except Exception as e:
+                print("[Luyện phản xạ] Lỗi khung hình:", e)
+
+            if self.practice_camera_on:
+                self.practice_after_id = self.after(10, update_reaction_frame)
+        def stop_reaction_training():
+            safe_stop()
+
+            self.reaction_round_started = False
+            self.reaction_round_start = None
+            self.reaction_success_frames = 0
+            self.reaction_best_confidence = 0.0
+            self.reaction_index = 0
+            self.reaction_results.clear()
+
+            self.sequence_data.clear()
+            self.prev_wx, self.prev_wy = None, None
+
+            self.practice_status_label.configure(
+                text="● Camera đang tắt",
+                text_color=T.MUTED,
+                fg_color="#2A2F35"
+            )
+
+            # ==========================================
+            # BÍ KÍP 2: DÙNG ẢNH ĐEN (BLANK IMAGE) ĐỂ XÓA MÀN HÌNH MỘT CÁCH AN TOÀN
+            # Tuyệt đối không dùng image=None để tránh Exception Tkinter
+            # ==========================================
+            from PIL import Image
+            blank_img = Image.new('RGB', (10, 10), (8, 12, 17))
+            blank_ctk = ctk.CTkImage(light_image=blank_img, dark_image=blank_img, size=(10, 10))
+            
+            self.practice_video_label.configure(
+                image=blank_ctk,
+                text="⚡\n\nNhấn 'Bắt đầu phản xạ' để mở camera"
+            )
+            self.practice_video_label.image = blank_ctk
+
+            self.reaction_question_label.configure(
+                text=f"0 / {len(self.reaction_targets)}"
+            )
+            self.reaction_score_label.configure(text="Đúng: 0")
+
+            set_waiting_target_ui("Chờ bắt đầu")
+
+            self.reaction_feedback_label.configure(
+                text="☆ Sẵn sàng chưa? Nhấn bắt đầu để luyện phản xạ.",
+                fg_color="#2A2F35",
+                text_color=T.MUTED
+            )
+
+            start_btn.configure(
+                text="▶  Bắt đầu phản xạ",
+                fg_color=T.ORANGE,
+                hover_color="#D98200",
+                command=start_training
+            )
+        def start_training():
+            import cv2
+
+            safe_stop()
+
+            if not load_ai_dependencies():
+                return
+
+            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(0)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            if not cap.isOpened():
+                messagebox.showerror("Lỗi", "Không mở được camera.")
+                cap.release()
+                return
+
+            self.practice_cap = cap
+            self.practice_camera_on = True
+
+            self.reaction_results.clear()
+            self.reaction_index = 0
+            self.reaction_session_start = time.time()
+
+            self.practice_status_label.configure(
+                text="● Camera đang bật",
+                text_color=T.GREEN,
+                fg_color="#17351F"
+            )
+
+            start_btn.configure(
+                text="■  Dừng luyện",
+                fg_color=T.RED,
+                hover_color="#D32F2F",
+                command=stop_reaction_training
+            )
+
+            set_waiting_target_ui("Sắp bắt đầu...")
+            begin_start_countdown(3)
+            update_reaction_frame()
+
+        set_waiting_target_ui("Chờ bắt đầu")
+        start_btn.configure(command=start_training)
+    # ==========================================
+    # KHỐI LOGIC: CỖ MÁY BÀI KIỂM TRA NHANH
+    # ==========================================
+    def show_quick_quiz(self):
+        import random
+        import sys, os
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        
+        learned = []
+        try:
+            import auth_ui
+            if auth_ui.CURRENT_USER:
+                learned = auth_ui.LEARNED_LETTERS or []
+        except Exception: pass
+
+        # 1. Trích xuất danh sách mọi ký hiệu để làm đáp án nhiễu
+        all_letters = []
+        for item in ALPHABET:
+            val = item.get("label") or item.get("title") if isinstance(item, dict) else item
+            val = str(val).replace("Chữ ", "").strip().upper()
+            if val and val not in all_letters:
+                all_letters.append(val)
+        if not all_letters:
+            all_letters = ["A", "B", "C", "D", "E", "G", "H", "I", "K", "L"]
+
+        # 2. Thuật toán chọn 10 câu hỏi (Ưu tiên từ đã học)
+        pool = learned.copy()
+        random.shuffle(pool)
+        if len(pool) < 10:
+            extra = [l for l in all_letters if l not in pool]
+            random.shuffle(extra)
+            pool.extend(extra[:10 - len(pool)])
+            
+        target_list = pool[:10]
+        if not target_list: return
+
+        # 3. Trộn đáp án (1 Đúng - 3 Sai)
+        self.quiz_data = []
+        for target in target_list:
+            distractors = [l for l in all_letters if l != target]
+            random.shuffle(distractors)
+            choices = distractors[:3] + [target]
+            random.shuffle(choices)
+            self.quiz_data.append({"target": target, "choices": choices})
+
+        self.quiz_score = 0
+        self.current_q_idx = 0
+
+        # --- DỰNG GIAO DIỆN PHÒNG THI ---
+        page = self._clear_page()
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_rowconfigure(1, weight=1)
+
+        # Thanh Header điều hướng
+        header = ctk.CTkFrame(page, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=30, pady=(20, 10))
+        header.grid_columnconfigure(1, weight=1)
+        self.back_button(header, command=self.show_review, text="←  Thoát").grid(row=0, column=0, sticky="w")
+        
+        prog_frame = ctk.CTkFrame(header, fg_color="transparent")
+        prog_frame.grid(row=0, column=1, sticky="ew", padx=40)
+        self.quiz_prog = ctk.CTkProgressBar(prog_frame, height=10, progress_color=T.BLUE, fg_color="#2A3038", corner_radius=5)
+        self.quiz_prog.pack(fill="x", pady=(15, 5))
+        
+        self.quiz_lbl_count = ctk.CTkLabel(header, text="Câu 1 / 10", font=ctk.CTkFont(size=16, weight="bold"), text_color=T.TEXT)
+        self.quiz_lbl_count.grid(row=0, column=2, sticky="e")
+
+        # Nội dung chính (Khu vực hình ảnh)
+        body = ctk.CTkFrame(page, fg_color="transparent")
+        body.grid(row=1, column=0, sticky="nsew", padx=30, pady=(0, 20))
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_rowconfigure(0, weight=1)
+        body.grid_rowconfigure(1, weight=0)
+
+        self.quiz_img_card = ctk.CTkFrame(body, fg_color=T.PANEL, corner_radius=20, border_width=1, border_color=T.BORDER)
+        self.quiz_img_card.grid(row=0, column=0, sticky="nsew", pady=(10, 20))
+        self.quiz_img_card.pack_propagate(False)
+        ctk.CTkLabel(self.quiz_img_card, text="Ký hiệu tay này là chữ gì?", font=ctk.CTkFont(size=20, weight="bold"), text_color=T.MUTED).pack(pady=(25, 10))
+        self.quiz_img_container = ctk.CTkFrame(self.quiz_img_card, fg_color="transparent")
+        self.quiz_img_container.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+
+        # Lưới 4 nút đáp án (2x2)
+        ans_frame = ctk.CTkFrame(body, fg_color="transparent")
+        ans_frame.grid(row=1, column=0, sticky="ew")
+        ans_frame.grid_columnconfigure((0, 1), weight=1)
+        
+        self.quiz_btns = []
+        for i in range(4):
+            r, c = divmod(i, 2)
+            btn = ctk.CTkButton(ans_frame, text="", height=65, font=ctk.CTkFont(size=22, weight="bold"), corner_radius=14, fg_color=T.PANEL, hover_color=T.CARD_HOVER, border_width=2, border_color=T.BORDER, text_color=T.TEXT)
+            btn.grid(row=r, column=c, sticky="ew", padx=10, pady=10)
+            self.quiz_btns.append(btn)
+
+        self.load_quiz_question()
+
+    def load_quiz_question(self):
+        if self.current_q_idx >= len(self.quiz_data):
+            self.show_quiz_result()
+            return
+            
+        q_data = self.quiz_data[self.current_q_idx]
+        target = q_data["target"]
+        choices = q_data["choices"]
+        
+        self.quiz_lbl_count.configure(text=f"Câu {self.current_q_idx + 1} / {len(self.quiz_data)}")
+        self.quiz_prog.set((self.current_q_idx) / len(self.quiz_data))
+        
+        for child in self.quiz_img_container.winfo_children():
+            child.destroy()
+            
+        # ==========================================
+        # BÍ KÍP 1: TÁCH 2 ẢNH CHO CHỮ CÓ DẤU TRONG BÀI TEST
+        # ==========================================
+        composite_map = {
+            "Ă": "DAU_A", "Â": "DAU_MU", "Ê": "DAU_MU",
+            "Ô": "DAU_MU", "Ơ": "DAU_MOC", "Ư": "DAU_MOC"
+        }
+        val = str(target).upper().strip()
+        
+        if val in composite_map:
+            # Tạo khung ngang chứa 2 ảnh
+            img_frame = ctk.CTkFrame(self.quiz_img_container, fg_color="transparent")
+            img_frame.pack(expand=True)
+            
+            # Ảnh chữ cái gốc
+            base_lesson = self.get_lesson(val) 
+            base_img = self.create_lesson_image_label(img_frame, base_lesson, size=(130, 130), height=150, fallback_font_size=70)
+            base_img.configure(fg_color="#080C11", corner_radius=16)
+            base_img.pack(side="left", padx=8)
+            
+            # Ảnh dấu đi kèm
+            mark_lesson = {"label": composite_map[val]}
+            mark_img = self.create_lesson_image_label(img_frame, mark_lesson, size=(130, 130), height=150, fallback_font_size=70)
+            mark_img.configure(fg_color="#080C11", corner_radius=16)
+            mark_img.pack(side="left", padx=8)
+        else:
+            # Chữ bình thường thì hiện 1 ảnh to
+            lesson = self.get_lesson(target)
+            img_lbl = self.create_lesson_image_label(self.quiz_img_container, lesson, size=(220, 220), height=240, fallback_font_size=100)
+            img_lbl.configure(fg_color="#080C11", corner_radius=16)
+            img_lbl.pack(expand=True)
+        # ==========================================
+        
+        for i, btn in enumerate(self.quiz_btns):
+            choice_val = choices[i]
+            btn.configure(text=f"Chữ {choice_val}", fg_color=T.PANEL, border_color=T.BORDER, text_color=T.TEXT, state="normal")
+            btn.configure(command=lambda b=btn, c=choice_val, t=target: self.check_quiz_answer(b, c, t))
+    def check_quiz_answer(self, btn, selected, target):
+        for b in self.quiz_btns:
+            b.configure(state="disabled") # Khóa toàn bộ nút
+            
+        if selected == target: # Chọn đúng
+            self.quiz_score += 1
+            btn.configure(fg_color="#17351F", border_color=T.GREEN, text_color=T.GREEN)
+            delay = 800
+        else: # Chọn sai
+            btn.configure(fg_color="#451A1F", border_color=T.RED, text_color=T.RED)
+            for b in self.quiz_btns:
+                if b.cget("text") == f"Chữ {target}":
+                    b.configure(fg_color="#17351F", border_color=T.GREEN, text_color=T.GREEN)
+            delay = 1500 # Sai thì phạt đợi lâu hơn 1 chút để nhìn đáp án
+            
+        self.current_q_idx += 1
+        self.after(delay, self.load_quiz_question) # Chuyển câu mượt mà
+
+    def show_quiz_result(self):
+        page = self._clear_page()
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_rowconfigure(0, weight=1)
+        
+        # Tính độ chính xác %
+        accuracy = int((self.quiz_score / len(self.quiz_data)) * 100) if self.quiz_data else 0
+        
+        # LƯU ĐỘ CHÍNH XÁC VÀO DATABASE THẬT (KHÔNG CỘNG ĐIỂM)
+        import sys, os
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        try:
+            import auth_ui, user_db
+            if auth_ui.CURRENT_USER:
+                updated = user_db.update_study_stats(auth_ui.CURRENT_USER["id"], accuracy, session_time_minutes=1)
+                if updated:
+                    auth_ui.CURRENT_USER.update(updated)
+        except Exception: pass
+        
+        card = ctk.CTkFrame(page, fg_color=T.PANEL, corner_radius=20, border_width=1, border_color=T.BORDER)
+        card.grid(row=0, column=0, sticky="nsew", padx=150, pady=80)
+        card.grid_columnconfigure(0, weight=1)
+        
+        ctk.CTkLabel(card, text="🏆", font=ctk.CTkFont(size=120)).pack(pady=(60, 20))
+        
+        if self.quiz_score >= 8: msg, color = "XUẤT SẮC!", T.GREEN
+        elif self.quiz_score >= 5: msg, color = "KHÁ LẮM!", T.BLUE
+        else: msg, color = "CẦN CỐ GẮNG HƠN!", T.ORANGE
+            
+        ctk.CTkLabel(card, text=msg, font=ctk.CTkFont(size=32, weight="bold"), text_color=color).pack(pady=(0, 10))
+        ctk.CTkLabel(card, text=f"Bạn đã trả lời đúng {self.quiz_score} trên {len(self.quiz_data)} câu hỏi.", font=ctk.CTkFont(size=18), text_color=T.MUTED).pack(pady=(0, 30))
+        
+        # ==========================================
+        # BÍ KÍP 2: THAY "ĐIỂM SỐ" THÀNH "ĐỘ CHÍNH XÁC %"
+        # ==========================================
+        score_box = ctk.CTkFrame(card, fg_color="#080C11", corner_radius=16)
+        score_box.pack(pady=(0, 40))
+        ctk.CTkLabel(score_box, text="Độ chính xác", font=ctk.CTkFont(size=15), text_color=T.MUTED).pack(pady=(15, 0))
+        ctk.CTkLabel(score_box, text=f"{accuracy}%", font=ctk.CTkFont(size=45, weight="bold"), text_color=color).pack(padx=60, pady=(0, 15))
+        # ==========================================
+        
+        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
+        btn_frame.pack()
+        ctk.CTkButton(btn_frame, text="⟳ Làm lại bài test", font=ctk.CTkFont(size=16, weight="bold"), height=50, width=180, fg_color=T.CARD, hover_color=T.CARD_HOVER, border_width=1, border_color=T.BORDER, command=self.show_quick_quiz).pack(side="left", padx=10)
+        ctk.CTkButton(btn_frame, text="← Trở về Ôn tập", font=ctk.CTkFont(size=16, weight="bold"), height=50, width=180, fg_color=T.BLUE, hover_color=T.BLUE_DARK, command=self.show_review).pack(side="left", padx=10)
+    def show_weak_signs(self):
+        import sys, os
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        self.refresh_account_button()
+        
+        is_logged_in = False
+        learned = []
+        
+        auth_module = None
+        for name, module in list(sys.modules.items()):
+            if name == "auth_ui" or name.endswith(".auth_ui"):
+                if getattr(module, "CURRENT_USER", None):
+                    auth_module = module
+                    break
+                    
+        if auth_module is None:
+            try:
+                import auth_ui
+                auth_module = auth_ui
+            except Exception: pass
+
+        if auth_module and getattr(auth_module, "CURRENT_USER", None):
+            is_logged_in = True
+            learned = getattr(auth_module, "LEARNED_LETTERS", [])
+
+        # KỊCH BẢN 1: Đã đăng nhập và có dữ liệu -> Bật Camera luôn
+        if is_logged_in and learned:
+            import random
+            weak_words = random.sample(learned, min(3, len(learned)))
+            self.show_camera_practice(pair_list=weak_words, back_cmd=self.show_review, practice_mode="weak_signs")
+            return
+
+        # KỊCH BẢN 2: Chưa đăng nhập hoặc chưa có dữ liệu -> Hiện trang thông báo khóa
+        page = self._content()
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_columnconfigure(1, weight=0)
+        
+        self._title(page, "KÝ HIỆU CẦN CHÚ Ý", "Khắc phục các ký hiệu bạn làm sai nhiều nhất")
+
+        header_right = ctk.CTkFrame(page, fg_color="transparent")
+        header_right.grid(row=0, column=1, sticky="ne", padx=(20, 60), pady=(0, 10))
+        self.back_button(header_right, command=self.show_review, text="←  Trở về").pack(anchor="e", pady=(0, 8))
+
+        main = ctk.CTkFrame(page, fg_color="transparent")
+        main.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=(0, 25), pady=(20, 0))
+        
+        if not is_logged_in:
+            empty_panel = ctk.CTkFrame(main, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
+            empty_panel.pack(fill="x", pady=20)
+            ctk.CTkLabel(empty_panel, text="🔒", font=ctk.CTkFont(size=70)).pack(pady=(50, 15))
+            ctk.CTkLabel(empty_panel, text="Vui lòng đăng nhập", font=ctk.CTkFont(size=22, weight="bold"), text_color=T.TEXT).pack()
+            ctk.CTkLabel(empty_panel, text="Hệ thống cần xác thực tài khoản để AI có thể phân tích lỗi sai của bạn.", text_color=T.MUTED, font=ctk.CTkFont(size=14)).pack(pady=(10, 25))
+            
+            def do_login():
+                self.show_auth_panel(return_page=self.show_weak_signs)
+                
+            ctk.CTkButton(empty_panel, text="Đăng nhập ngay", font=ctk.CTkFont(size=15, weight="bold"), fg_color=T.BLUE, hover_color=T.BLUE_DARK, height=45, command=do_login).pack(pady=(0, 50))
+            return
+
+        if not learned:
+            empty_panel = ctk.CTkFrame(main, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
+            empty_panel.pack(fill="x", pady=20)
+            ctk.CTkLabel(empty_panel, text="📭", font=ctk.CTkFont(size=70)).pack(pady=(50, 15))
+            ctk.CTkLabel(empty_panel, text="Chưa có dữ liệu", font=ctk.CTkFont(size=22, weight="bold"), text_color=T.TEXT).pack()
+            ctk.CTkLabel(empty_panel, text="Bạn chưa hoàn thành bài học nào. Hãy học thêm từ mới để hệ thống có thể phân tích!", text_color=T.MUTED, font=ctk.CTkFont(size=14)).pack(pady=(10, 25))
+            ctk.CTkButton(empty_panel, text="Đến Bảng chữ cái", font=ctk.CTkFont(size=15, weight="bold"), fg_color=T.BLUE, height=45, command=self.show_alphabet).pack(pady=(0, 50))
+            return
 def open_study_window(parent=None):
     """Mở giao diện Góc học tập từ app chính."""
     ctk.set_appearance_mode("dark")

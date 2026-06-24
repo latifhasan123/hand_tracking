@@ -121,3 +121,43 @@ def update_study_stats(user_id, accuracy, time_minutes):
     except Exception as e:
         print("Lỗi update_study_stats:", e)
         return None
+def get_leaderboard(limit=5):
+    """Lấy danh sách Top người chơi có điểm số cao nhất"""
+    try:
+        conn = get_conn()
+        cursor = conn.cursor()
+        # Lấy HoTen (nếu null thì lấy TenDangNhap) và DiemSo, sắp xếp giảm dần
+        cursor.execute(f"""
+            SELECT TOP {limit} 
+                   ISNULL(HoTen, TenDangNhap) as TenHienThi, 
+                   DiemSo 
+            FROM TaiKhoan 
+            ORDER BY DiemSo DESC
+        """)
+        return cursor.fetchall()
+    except Exception as e:
+        print("Lỗi get_leaderboard:", e)
+        return []
+
+def get_user_minigame_stats(user_id):
+    """Lấy thông tin thành tích cá nhân để hiển thị cột bên phải"""
+    try:
+        conn = get_conn()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DiemSo, DoChinhXacTB, ChuoiNgayHoc, TongSoLanTap 
+            FROM TaiKhoan 
+            WHERE ID = ?
+        """, (user_id,))
+        row = cursor.fetchone()
+        if row:
+            return {
+                "DiemSo": row[0] or 0,
+                "DoChinhXacTB": row[1] or 0,
+                "ChuoiNgayHoc": row[2] or 0,
+                "TongSoLanTap": row[3] or 0
+            }
+        return None
+    except Exception as e:
+        print("Lỗi get_user_minigame_stats:", e)
+        return None

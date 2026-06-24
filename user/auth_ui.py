@@ -160,4 +160,68 @@ class AuthFrame(ctk.CTkFrame):
                 messagebox.showerror("Lỗi", msg)
 
 def show_auth_window(parent, on_success=None):
-    pass
+    """
+    Mở panel / cửa sổ Đăng nhập - Đăng ký.
+    Hàm này được gọi từ nút sidebar và nút 'Đăng nhập ngay'
+    trong trang Từ đã học gần đây.
+    """
+
+    # Nếu đã đăng nhập rồi thì báo và chạy callback nếu có
+    global CURRENT_USER
+
+    if CURRENT_USER is not None:
+        messagebox.showinfo(
+            "Tài khoản",
+            f"Bạn đang đăng nhập với tài khoản: {CURRENT_USER.get('username', 'User')}"
+        )
+        if on_success:
+            on_success()
+        return
+
+    # Tạo cửa sổ đăng nhập
+    win = ctk.CTkToplevel(parent)
+    win.title("Đăng nhập / Đăng ký")
+    win.geometry("760x820")
+    win.minsize(700, 720)
+    win.configure(fg_color="#0B0F18")
+
+    # Cho cửa sổ nổi lên trên app chính
+    win.transient(parent)
+    win.lift()
+    win.focus_force()
+    win.grab_set()
+
+    # Căn giữa cửa sổ theo màn hình
+    try:
+        win.update_idletasks()
+        screen_w = win.winfo_screenwidth()
+        screen_h = win.winfo_screenheight()
+        w = 760
+        h = 820
+        x = int((screen_w - w) / 2)
+        y = int((screen_h - h) / 2)
+        win.geometry(f"{w}x{h}+{x}+{y}")
+    except Exception:
+        pass
+
+    def handle_success():
+        # Đăng nhập thành công thì đóng cửa sổ auth
+        try:
+            win.grab_release()
+        except Exception:
+            pass
+
+        try:
+            win.destroy()
+        except Exception:
+            pass
+
+        # Gọi lại hàm bên study_ui.py
+        # Ví dụ: self.show_recent_words
+        if on_success:
+            on_success()
+
+    auth_frame = AuthFrame(win, on_success=handle_success)
+    auth_frame.pack(fill="both", expand=True)
+
+    return win

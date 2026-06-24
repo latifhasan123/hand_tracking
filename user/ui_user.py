@@ -216,15 +216,14 @@ def create_user_menu(root):
     account_btn.pack(side="top", fill="x", padx=15)
 
     # 3. NÚT ĐĂNG XUẤT (Nằm dưới cùng, mặc định ẩn)
+    # 3. NÚT ĐĂNG XUẤT (Nằm dưới cùng, mặc định ẩn)
     def perform_logout():
         if messagebox.askyesno("Đăng xuất", "Bạn có chắc chắn muốn đăng xuất khỏi tài khoản này?"):
             if 'auth_ui' in sys.modules:
-                auth_ui.CURRENT_USER = None
-                auth_ui.LEARNED_LETTERS = []
+                sys.modules['auth_ui'].CURRENT_USER = None
+                sys.modules['auth_ui'].LEARNED_LETTERS = []
             
-            # Trả lại trạng thái mặc định
-            account_btn.configure(text="👤  Đăng nhập / Đăng ký", fg_color=COLORS["card2"], text_color="white")
-            logout_btn.pack_forget()
+            root.refresh_sidebar_auth() # Gọi hàm đồng bộ
             show_study_panel()       
 
     logout_btn = ctk.CTkButton(
@@ -239,6 +238,24 @@ def create_user_menu(root):
         text_color="white",
         command=perform_logout
     )
+
+    # ==========================================
+    # BÍ KÍP CHỐNG XUNG ĐỘT: Cầu nối đồng bộ Sidebar
+    # Gắn hàm này vào root để các module con (như study_ui) có thể gọi ngược ra ngoài!
+    # ==========================================
+    def refresh_sidebar_auth():
+        try:
+            import auth_ui
+            if auth_ui.CURRENT_USER is not None:
+                account_btn.configure(text=f"🟢  Chào, {auth_ui.CURRENT_USER['username']}", fg_color="#17351F", text_color="white")
+                logout_btn.pack(after=account_btn, side="top", fill="x", padx=15, pady=(8, 0))
+            else:
+                account_btn.configure(text="👤  Đăng nhập / Đăng ký", fg_color=COLORS["card2"], text_color="white")
+                logout_btn.pack_forget()
+        except Exception:
+            pass
+            
+    root.refresh_sidebar_auth = refresh_sidebar_auth # Gắn chặt vào cửa sổ cha
     # ==========================================
     # KHUNG NỘI DUNG CHÍNH: các mục Dịch tự do / Góc học tập / Minigame
     # sẽ được đổi ngay trong khung này, không mở cửa sổ mới.
