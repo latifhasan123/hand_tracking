@@ -385,21 +385,20 @@ class MinigameFrame(ctk.CTkFrame):
         return tile
 
     # ---------- Navigation ----------
+    # ---------- Navigation ----------
     def open_game(self, key: str):
         # Dọn dẹp đồng hồ nếu đang chạy dở
         if hasattr(self, '_stop_word_timer'): self._stop_word_timer()
         if hasattr(self, '_stop_reaction_timer'): self._stop_reaction_timer()
         
         {
-            "guess": getattr(self, "start_guess_game", self.show_dashboard),
+            "guess": getattr(self, "show_sign_rain_game", self.show_dashboard),
             "word": getattr(self, "start_word_game", self.show_dashboard),
-            # BÍ KÍP 1: Bật định tuyến cho 2 siêu phẩm mới
             "react": getattr(self, "start_reaction_game", self.show_dashboard),
-            "quiz": getattr(self, "start_quiz_game", self.show_dashboard),
+            "quiz": getattr(self, "show_safecracker_game", self.show_dashboard), # ĐÃ SỬA DÒNG NÀY
             "flashcard": getattr(self, "show_flashcard_game", self.show_dashboard),
             "wheel": getattr(self, "show_wheel_game", self.show_dashboard),
         }.get(key, self.show_dashboard)()
-
     # ---------- Mini widgets ----------
     def _side_score_panel(self, parent, title: str, rows):
         panel = self._panel(parent, row=0, column=1, sticky="nsew", padx=(14, 0))
@@ -473,182 +472,323 @@ class MinigameFrame(ctk.CTkFrame):
             except: pass
         return None
 
-    def start_guess_game(self):
-        # Khởi tạo chỉ số sinh tồn
-        self.guess_hearts = 3
-        self.guess_score = 0
-        self.guess_combo = 0
-        self.guess_history = []
+    # =========================================================================
+    # CỖ MÁY MINIGAME 1: MƯA KÝ HIỆU (SIGN RAIN / DEFENDER)
+    # =========================================================================
+    # =========================================================================
+    # CỖ MÁY MINIGAME 1: MƯA KÝ HIỆU (SIGN RAIN / DEFENDER)
+    # =========================================================================
+    def show_sign_rain_game(self):
+        """Giao diện & Logic cho game Mưa Ký Hiệu (Sign Rain)"""
+        # Dọn dẹp các timer cũ nếu có
+        if hasattr(self, '_stop_word_timer'): self._stop_word_timer()
+        if hasattr(self, '_stop_reaction_timer'): self._stop_reaction_timer()
         
-        # Trích xuất danh sách chữ cái từ Dữ liệu gốc
-        import random
-        try:
-            from .data import ALPHABET
-            self.guess_pool = []
-            for item in ALPHABET:
-                val = item.get("label") or item.get("title") if isinstance(item, dict) else item
-                val = str(val).replace("Chữ ", "").strip().upper()
-                if len(val) == 1 and val not in self.guess_pool: # Chỉ lấy chữ cái đơn
-                    self.guess_pool.append(val)
-        except:
-            self.guess_pool = ["A", "B", "C", "D", "E", "G", "H", "I", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "X", "Y"]
-            
-        self._load_next_guess_question()
-
-    def _load_next_guess_question(self):
-        # Kiểm tra điều kiện Tử Vong (Game Over)
-        if self.guess_hearts <= 0:
-            self.show_guess_game_over()
-            return
-            
-        import random
-        self.guess_target = random.choice(self.guess_pool)
-        distractors = [l for l in self.guess_pool if l != self.guess_target]
-        random.shuffle(distractors)
-        self.guess_choices = distractors[:3] + [self.guess_target]
-        random.shuffle(self.guess_choices)
-        
-        self.show_guess_game()
-
-    def show_guess_game(self):
-        if not hasattr(self, 'guess_hearts'):
-            self.start_guess_game()
-            return
-            
+        self.current_screen = "sign_rain"
         self.clear_content()
         page = self._page()
-        self._header(page, "ĐOÁN CHỮ CÁI", "Chế độ Sinh tồn: Sai 3 lần là Game Over!")
+        
+        # --- CẤU TRÚC DỮ LIỆU GAME (STATE) ---
+        self.sr_is_playing = False
+        self.sr_score = 0
+        self.sr_lives = 3
+        self.sr_active_targets = []  
+        self.sr_spawn_counter = 0
+        self.sr_speed_multiplier = 1.0
+        self.sr_cap = None
+        self.sr_camera_after_id = None
+        self.sr_game_after_id = None
+        
+        # Bộ biến AI
+        self.sequence_data = []
+        self.prev_wx = None
+        self.prev_wy = None
+        self.mp_hands = None
+        self.mp_draw = None
+        self.ai_session = None
+        self.ai_labels = None
+
+        # --- GIAO DIỆN CHÍNH ---
+        header = ctk.CTkFrame(page, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 14))
+        header.grid_columnconfigure(0, weight=1)
+        
+        ctk.CTkLabel(header, text="MƯA KÝ HIỆU 🌧️", font=(FONT, 30, "bold"), text_color=COLORS["text"]).grid(row=0, column=0, sticky="w")
+        
+        def go_back():
+            self.sr_is_playing = False
+            if self.sr_cap: self.sr_cap.release()
+            if self.sr_camera_after_id: self.after_cancel(self.sr_camera_after_id)
+            if self.sr_game_after_id: self.after_cancel(self.sr_game_after_id)
+            self.show_dashboard()
+            
+        ctk.CTkButton(header, text="← Trở về", font=(FONT, 15, "bold"), fg_color=COLORS["panel"], hover_color=COLORS["stroke"], height=40, command=go_back).grid(row=0, column=1, sticky="e", padx=20)
+
         body = self._game_body(page)
-        
-        # --- KHU VỰC TRUNG TÂM (GAME PLAY) ---
-        game = self._panel(body, row=0, column=0, sticky="nsew")
-        game.grid_columnconfigure((0, 1), weight=1)
-        
-        # Thanh trạng thái (Mạng & Xu)
-        status_bar = ctk.CTkFrame(game, fg_color="transparent")
-        status_bar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 0))
-        ctk.CTkLabel(status_bar, text="❤️ " * self.guess_hearts + "🖤 " * (3 - self.guess_hearts), font=(FONT, 24), text_color=COLORS["red"]).pack(side="left")
-        ctk.CTkLabel(status_bar, text=f"💰 {self.guess_score} Xu", font=(FONT, 24, "bold"), text_color=COLORS["yellow"]).pack(side="right")
-        
-        ctk.CTkLabel(game, text="Ký hiệu tay này là chữ gì?", font=(FONT, 22, "bold"), text_color=COLORS["text"]).grid(row=1, column=0, columnspan=2, pady=(10, 8))
-        
-        # Nạp ảnh thật từ hệ thống
-        img_box = ctk.CTkFrame(game, fg_color="#0D1424", corner_radius=16)
-        img_box.grid(row=2, column=0, columnspan=2, pady=(4, 18))
-        real_img = self._get_real_image(self.guess_target, size=(200, 200))
-        
-        if real_img:
-            ctk.CTkLabel(img_box, text="", image=real_img).pack(padx=30, pady=30)
-        else:
-            self._hand_canvas(img_box, "B", 260, 210).pack(padx=20, pady=20) # Dự phòng
 
-        # 4 Nút đáp án tương tác trực tiếp
-        self.guess_buttons = []
-        for idx, val in enumerate(self.guess_choices):
-            btn = ctk.CTkButton(
-                game, text=f"{chr(65+idx)}.  Chữ {val}", height=58, corner_radius=10,
-                fg_color=COLORS["card"], hover_color=COLORS["card_hover"],
-                border_color=COLORS["stroke"], border_width=1,
-                font=(FONT, 18, "bold"), text_color=COLORS["text"]
-            )
-            btn.grid(row=3 + idx // 2, column=idx % 2, sticky="ew", padx=18, pady=8)
-            btn.configure(command=lambda b=btn, v=val: self._check_guess_answer(b, v))
-            self.guess_buttons.append(btn)
-
-        # --- KHU VỰC BÊN PHẢI (POWER-UPS) ---
-        side_panel = self._panel(body, row=0, column=1, sticky="nsew", padx=(14, 0))
-        ctk.CTkLabel(side_panel, text="▮  Vật phẩm hỗ trợ", font=(FONT, 18, "bold"), text_color=COLORS["text"]).pack(anchor="w", padx=20, pady=(20, 10))
+        # --- CỘT TRÁI: KHU VỰC GAME (CANVAS) ---
+        game_board = ctk.CTkFrame(body, fg_color=COLORS["panel_2"], border_color=COLORS["stroke"], border_width=2, corner_radius=16)
+        game_board.grid(row=0, column=0, sticky="nsew")
         
-        # Cơ chế Cửa hàng Vật phẩm
-        def use_powerup(ptype):
-            from tkinter import messagebox
-            if ptype == "5050":
-                if self.guess_score >= 50:
-                    self.guess_score -= 50
-                    wrong_answers = [b for b in self.guess_buttons if b.cget("text").split("Chữ ")[-1] != self.guess_target]
-                    import random
-                    for b in random.sample(wrong_answers, 2):
-                        b.configure(text="", state="disabled", fg_color="#121826", border_color="#121826")
-                    self.show_guess_game() # Reload UI để trừ tiền hiển thị
-                else: messagebox.showinfo("Cửa hàng", "Bạn không đủ 50 Xu để dùng!")
-            elif ptype == "heal":
-                if self.guess_score >= 100:
-                    if self.guess_hearts < 3:
-                        self.guess_score -= 100
-                        self.guess_hearts += 1
-                        self.show_guess_game()
-                    else: messagebox.showinfo("Đầy máu", "Bạn đang đầy máu, không cần dùng đâu!")
-                else: messagebox.showinfo("Cửa hàng", "Bạn không đủ 100 Xu để dùng!")
-
-        # Thẻ mua 50/50
-        p1 = ctk.CTkFrame(side_panel, fg_color=COLORS["card"], border_color=COLORS["purple"], border_width=1, corner_radius=12)
-        p1.pack(fill="x", padx=16, pady=6)
-        ctk.CTkLabel(p1, text="🃏", font=(FONT, 26)).pack(side="left", padx=14, pady=10)
-        ctk.CTkLabel(p1, text="Trợ giúp 50/50\nXóa 2 đáp án sai", justify="left", font=(FONT, 12)).pack(side="left")
-        ctk.CTkButton(p1, text="-50 Xu", width=60, fg_color=COLORS["purple"], font=(FONT, 12, "bold"), command=lambda: use_powerup("5050")).pack(side="right", padx=14)
-
-        # Thẻ mua Hồi sinh
-        p2 = ctk.CTkFrame(side_panel, fg_color=COLORS["card"], border_color=COLORS["green"], border_width=1, corner_radius=12)
-        p2.pack(fill="x", padx=16, pady=6)
-        ctk.CTkLabel(p2, text="💖", font=(FONT, 26)).pack(side="left", padx=14, pady=10)
-        ctk.CTkLabel(p2, text="Hồi sinh\nCộng 1 Trái tim", justify="left", font=(FONT, 12)).pack(side="left")
-        ctk.CTkButton(p2, text="-100 Xu", width=60, fg_color=COLORS["green"], font=(FONT, 12, "bold"), command=lambda: use_powerup("heal")).pack(side="right", padx=14)
+        import tkinter as tk
+        self.sr_canvas = tk.Canvas(game_board, bg="#080C11", highlightthickness=0)
+        self.sr_canvas.pack(fill="both", expand=True, padx=15, pady=15)
         
-        # Thống kê hiện tại
-        ctk.CTkFrame(side_panel, height=1, fg_color=COLORS["stroke_light"]).pack(fill="x", padx=20, pady=15)
-        self._small_score(side_panel, "🔥", "Combo liên tiếp", str(self.guess_combo), "orange").pack(fill="x", padx=16, pady=6)
-        self._small_score(side_panel, "🎯", "Số câu đã qua", str(len(self.guess_history)), "blue").pack(fill="x", padx=16, pady=6)
+        # --- CỘT PHẢI: CAMERA & BẢNG ĐIỂM ---
+        right_panel = self._panel(body, row=0, column=1, sticky="nsew", padx=(14, 0))
+        
+        stats_frame = ctk.CTkFrame(right_panel, fg_color=COLORS["card"], corner_radius=16)
+        stats_frame.pack(fill="x", padx=16, pady=16)
+        
+        score_row = ctk.CTkFrame(stats_frame, fg_color="transparent")
+        score_row.pack(fill="x", padx=20, pady=(20, 5))
+        ctk.CTkLabel(score_row, text="Điểm số:", font=(FONT, 18, "bold"), text_color=COLORS["text"]).pack(side="left")
+        self.lbl_score = ctk.CTkLabel(score_row, text="0", font=(FONT, 28, "bold"), text_color=COLORS["yellow"])
+        self.lbl_score.pack(side="right")
+        
+        lives_row = ctk.CTkFrame(stats_frame, fg_color="transparent")
+        lives_row.pack(fill="x", padx=20, pady=(5, 20))
+        ctk.CTkLabel(lives_row, text="Mạng:", font=(FONT, 18, "bold"), text_color=COLORS["text"]).pack(side="left")
+        self.lbl_lives = ctk.CTkLabel(lives_row, text="❤️ ❤️ ❤️", font=(FONT, 22), text_color=COLORS["red"])
+        self.lbl_lives.pack(side="right")
+        
+        cam_frame = ctk.CTkFrame(right_panel, fg_color=COLORS["panel_2"], corner_radius=16)
+        cam_frame.pack(fill="x", padx=16, pady=(0, 16))
+        ctk.CTkLabel(cam_frame, text="Camera AI", font=(FONT, 16, "bold"), text_color=COLORS["blue_2"]).pack(pady=(15, 5))
+        
+        self.sr_video_label = ctk.CTkLabel(cam_frame, text="📷 Đang chờ...", height=200, fg_color="#05080D", corner_radius=12)
+        self.sr_video_label.pack(fill="x", padx=15, pady=(0, 15))
+        
+        self.lbl_ai_detect = ctk.CTkLabel(cam_frame, text="AI Đang thấy: --", font=(FONT, 16, "bold"), text_color=COLORS["green"])
+        self.lbl_ai_detect.pack(pady=(0, 15))
+        
+        self.btn_sr_start = ctk.CTkButton(right_panel, text="▶ BẮT ĐẦU CHƠI", font=(FONT, 18, "bold"), height=60, corner_radius=16, fg_color=COLORS["blue"], hover_color="#0B62D5")
+        self.btn_sr_start.pack(fill="x", side="bottom", padx=16, pady=16)
 
-        self._bottom_controls(body, [("✕  Đầu hàng & Thoát", "red", self.show_dashboard)])
-
-    def _check_guess_answer(self, btn, selected_val):
-        for b in self.guess_buttons:
-            b.configure(state="disabled") # Ngăn người chơi bấm spam
+        # ==================================================
+        # CORE LOGIC: CÁC HÀM XỬ LÝ (NESTED FUNCTIONS)
+        # ==================================================
+        def load_ai():
+            """Nạp Model AI và Mediapipe"""
+            import mediapipe as mp
+            import numpy as np
+            import onnxruntime as ort
+            import os
             
-        if selected_val == self.guess_target:
-            self.guess_combo += 1
-            reward = 10 + (self.guess_combo * 2) # Combo càng cao, Vàng càng nhiều
-            self.guess_score += reward
-            self.guess_history.append((selected_val, True))
-            btn.configure(fg_color="#17351F", border_color=COLORS["green"], text_color=COLORS["green"])
-            self.after(500, self._load_next_guess_question) # Nhảy câu cực nhanh nếu đúng
-        else:
-            self.guess_hearts -= 1
-            self.guess_combo = 0
-            self.guess_history.append((selected_val, False))
-            btn.configure(fg_color="#451A1F", border_color=COLORS["red"], text_color=COLORS["red"])
-            
-            # Hiện đáp án đúng màu xanh để học hỏi
-            for b in self.guess_buttons:
-                if b.cget("text").split("Chữ ")[-1] == self.guess_target:
-                    b.configure(fg_color="#17351F", border_color=COLORS["green"], text_color=COLORS["green"])
-            
-            self.after(1500, self._load_next_guess_question) # Giữ lại 1.5s để người chơi thấy lỗi sai
+            if not self.mp_hands:
+                self.mp_hands = mp.solutions.hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
+                self.mp_draw = mp.solutions.drawing_utils
+                
+            if not self.ai_session:
+                try:
+                    model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'model', 'model.onnx'))
+                    label_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'model', 'labels.npy'))
+                    if not os.path.exists(model_path): model_path = "model/model.onnx"
+                    if not os.path.exists(label_path): label_path = "model/labels.npy"
+                    
+                    self.ai_session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+                    self.ai_labels = np.load(label_path)
+                    return True
+                except Exception as e:
+                    print("Lỗi load AI:", e)
+                    return False
+            return True
 
-    def show_guess_game_over(self):
-        self.clear_content()
-        page = self._page()
-        page.grid_columnconfigure(0, weight=1)
-        page.grid_rowconfigure(0, weight=1)
-        
-        card = ctk.CTkFrame(page, fg_color=COLORS["panel"], corner_radius=20, border_color=COLORS["stroke"], border_width=1)
-        card.grid(row=0, column=0, sticky="nsew", padx=150, pady=80)
-        card.grid_columnconfigure(0, weight=1)
-        
-        ctk.CTkLabel(card, text="💀", font=(FONT, 100)).pack(pady=(60, 20))
-        ctk.CTkLabel(card, text="GAME OVER", font=(FONT, 36, "bold"), text_color=COLORS["red"]).pack(pady=(0, 10))
-        ctk.CTkLabel(card, text=f"Bạn đã sống sót qua {len(self.guess_history)} câu hỏi.", font=(FONT, 18), text_color=COLORS["muted"]).pack(pady=(0, 30))
-        
-        score_box = ctk.CTkFrame(card, fg_color="#080C11", corner_radius=16)
-        score_box.pack(pady=(0, 40))
-        ctk.CTkLabel(score_box, text="Tổng Xu thu thập được", font=(FONT, 16), text_color=COLORS["muted"]).pack(pady=(20, 0))
-        ctk.CTkLabel(score_box, text=f"💰 {self.guess_score}", font=(FONT, 48, "bold"), text_color=COLORS["yellow"]).pack(padx=60, pady=(0, 20))
-        
-        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
-        btn_frame.pack()
-        ctk.CTkButton(btn_frame, text="⟳ Chơi lại", font=(FONT, 18, "bold"), height=54, width=180, fg_color=COLORS["blue"], command=self.start_guess_game).pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame, text="🏠 Về Bảng điều khiển", font=(FONT, 18, "bold"), height=54, width=220, fg_color=COLORS["card"], hover_color=COLORS["card_hover"], command=self.show_dashboard).pack(side="left", padx=10)
+        def hand_vectorlize(landmarks, hand_type, prev_wx, prev_wy):
+            import numpy as np
+            wx, wy = landmarks[0].x, landmarks[0].y
+            vector = []
+            for i in range(1, 21):
+                vector.extend([landmarks[i].x - wx, landmarks[i].y - wy])
+            delta_x = (wx - prev_wx)*30 if prev_wx else 0.0
+            delta_y = (wy - prev_wy)*30 if prev_wy else 0.0
+            vector.extend([hand_type, delta_x, delta_y])
+            return np.array(vector), wx, wy
 
+        def login_and_save(score):
+            """Hàm tạm lưu điểm và gọi màn hình đăng nhập"""
+            self.pending_save_score = score
+            self._trigger_login_flow()
+
+        def game_over():
+            self.sr_is_playing = False
+            
+            # 1. CHỐNG LAG: Phải giải phóng (Release) Camera ngay lập tức
+            if self.sr_cap:
+                self.sr_cap.release()
+                self.sr_cap = None
+            if hasattr(self, 'sr_video_label') and self.sr_video_label.winfo_exists():
+                self.sr_video_label.configure(image="", text="Đã tắt Camera")
+
+            self.sr_canvas.delete("all")
+            self.sr_canvas.create_text(self.sr_canvas.winfo_width()/2, self.sr_canvas.winfo_height()/2 - 40, text="GAME OVER", font=(FONT, 50, "bold"), fill=COLORS["red"])
+            self.sr_canvas.create_text(self.sr_canvas.winfo_width()/2, self.sr_canvas.winfo_height()/2 + 10, text=f"Điểm của bạn: {self.sr_score}", font=(FONT, 25), fill=COLORS["text"])
+            self.btn_sr_start.configure(text="⟳ CHƠI LẠI", state="normal", fg_color=COLORS["orange"], hover_color="#CC7A00")
+            
+            # 2. XỬ LÝ LƯU DATABASE & GỢI Ý ĐĂNG NHẬP
+            if self.current_user_id:
+                try:
+                    db = self._get_db()
+                    if db and hasattr(db, 'get_conn'):
+                        conn = db.get_conn()
+                        cursor = conn.cursor()
+                        # Cập nhật điểm số và tăng số lần chơi
+                        cursor.execute("UPDATE TaiKhoan SET DiemSo = ISNULL(DiemSo, 0) + ? WHERE ID = ?", (self.sr_score, self.current_user_id))
+                        cursor.execute("UPDATE TaiKhoan SET TongSoLanTap = ISNULL(TongSoLanTap, 0) + 1 WHERE ID = ?", (self.current_user_id,))
+                        conn.commit()
+                        self.sr_canvas.create_text(self.sr_canvas.winfo_width()/2, self.sr_canvas.winfo_height()/2 + 60, text="✅ Đã lưu kết quả vào hệ thống!", font=(FONT, 16), fill=COLORS["green"])
+                except Exception as e:
+                    print("Lỗi lưu điểm:", e)
+            else:
+                self.sr_canvas.create_text(self.sr_canvas.winfo_width()/2, self.sr_canvas.winfo_height()/2 + 60, text="🔒 Bạn chưa đăng nhập. Điểm này chưa được lưu!", font=(FONT, 16), fill=COLORS["orange"])
+                # Bật popup nút bấm ngay giữa màn hình
+                self.btn_sr_login = ctk.CTkButton(self.sr_canvas.master, text="👤 Đăng nhập để lưu điểm", font=(FONT, 16, "bold"), fg_color=COLORS["blue"], command=lambda: login_and_save(self.sr_score))
+                self.btn_sr_login.place(relx=0.5, rely=0.85, anchor="center")
+
+        def game_loop():
+            if not self.sr_is_playing: return
+            
+            w = self.sr_canvas.winfo_width()
+            h = self.sr_canvas.winfo_height()
+            
+            to_remove = []
+            for target in self.sr_active_targets:
+                self.sr_canvas.move(target['id'], 0, target['speed'] * self.sr_speed_multiplier)
+                coords = self.sr_canvas.coords(target['id'])
+                if coords and coords[1] > h:
+                    to_remove.append(target)
+            
+            for target in to_remove:
+                self.sr_canvas.delete(target['id'])
+                if target in self.sr_active_targets:
+                    self.sr_active_targets.remove(target)
+                self.sr_lives -= 1
+                self.lbl_lives.configure(text=" ".join(["❤️"] * max(0, self.sr_lives)))
+                
+                self.sr_canvas.config(bg="#330000")
+                self.after(100, lambda: self.sr_canvas.config(bg="#080C11") if self.sr_is_playing else None)
+                
+                if self.sr_lives <= 0:
+                    game_over()
+                    return
+            
+            self.sr_spawn_counter += 1
+            spawn_rate = max(20, 60 - int(self.sr_score / 50)) 
+            
+            if self.sr_spawn_counter >= spawn_rate:
+                self.sr_spawn_counter = 0
+                import random
+                char = random.choice(['A','B','C','D','E','G','H','I','K','L','M','N','O','P','Q','R','S','T','U','V','X','Y'])
+                x_pos = random.randint(50, max(100, w - 50))
+                
+                text_id = self.sr_canvas.create_text(x_pos, 0, text=char, font=(FONT, 45, "bold"), fill=COLORS["blue_2"])
+                self.sr_active_targets.append({'char': char, 'id': text_id, 'speed': random.uniform(2.5, 4.0)})
+                self.sr_speed_multiplier += 0.01
+
+            self.sr_game_after_id = self.after(30, game_loop)
+
+        def camera_loop():
+            if not self.sr_is_playing or not self.sr_cap: return
+            import cv2
+            import numpy as np
+            from PIL import Image
+            import mediapipe as mp
+
+            success, frame = self.sr_cap.read()
+            if success:
+                frame = cv2.flip(frame, 1)
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                predicted_char = ""
+                confidence = 0.0
+
+                if self.mp_hands:
+                    results = self.mp_hands.process(frame_rgb)
+                    if results.multi_hand_landmarks:
+                        for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+                            self.mp_draw.draw_landmarks(frame, hand_landmarks, mp.solutions.hands.HAND_CONNECTIONS)
+                            hand_type = 0 if handedness.classification[0].label == "Left" else 1
+                            vector, self.prev_wx, self.prev_wy = hand_vectorlize(hand_landmarks.landmark, hand_type, self.prev_wx, self.prev_wy)
+                            self.sequence_data.append(vector)
+                            
+                            if len(self.sequence_data) > 30: self.sequence_data.pop(0)
+                            
+                            if len(self.sequence_data) == 30 and self.ai_session:
+                                try:
+                                    input_data = np.expand_dims(self.sequence_data, axis=0).astype(np.float32)
+                                    out = self.ai_session.run(None, {self.ai_session.get_inputs()[0].name: input_data})[0][0]
+                                    max_idx = np.argmax(out)
+                                    confidence = float(out[max_idx])
+                                    if confidence > 0.65:
+                                        predicted_char = str(self.ai_labels[max_idx]).upper()
+                                except: pass
+                    else:
+                        self.sequence_data.clear()
+                        self.prev_wx = self.prev_wy = None
+
+                if predicted_char:
+                    self.lbl_ai_detect.configure(text=f"AI Đang thấy: {predicted_char}", text_color=COLORS["green"])
+                else:
+                    self.lbl_ai_detect.configure(text="AI Đang thấy: --", text_color=COLORS["muted"])
+
+                if predicted_char and confidence > 0.65:
+                    for target in self.sr_active_targets:
+                        if target['char'] == predicted_char:
+                            self.sr_canvas.delete(target['id'])
+                            coords = self.sr_canvas.coords(target['id'])
+                            if coords:
+                                boom_id = self.sr_canvas.create_text(coords[0], coords[1], text="💥 BÙM", font=(FONT, 20, "bold"), fill=COLORS["orange"])
+                                self.after(300, lambda i=boom_id: self.sr_canvas.delete(i))
+                            
+                            self.sr_active_targets.remove(target)
+                            self.sr_score += 10
+                            self.lbl_score.configure(text=str(self.sr_score))
+                            self.sequence_data.clear()
+                            break
+
+                h, w = frame.shape[:2]
+                scale = min(320/w, 200/h)
+                new_w, new_h = max(1, int(w*scale)), max(1, int(h*scale))
+                frame_res = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), (new_w, new_h), interpolation=cv2.INTER_AREA)
+                
+                imgtk = ctk.CTkImage(light_image=Image.fromarray(frame_res), dark_image=Image.fromarray(frame_res), size=(new_w, new_h))
+                self.sr_video_label.configure(image=imgtk, text="")
+                self.sr_video_label.image = imgtk
+
+            self.sr_camera_after_id = self.after(15, camera_loop)
+
+        def start_game():
+            # Dọn dẹp nút "Đăng nhập" nếu nó đang hiện từ ván trước
+            if hasattr(self, 'btn_sr_login') and self.btn_sr_login.winfo_exists():
+                self.btn_sr_login.destroy()
+                
+            import cv2
+            if not load_ai():
+                self.lbl_ai_detect.configure(text="Lỗi nạp Model AI!", text_color=COLORS["red"])
+                return
+            
+            self.sr_is_playing = True
+            self.sr_score = 0
+            self.sr_lives = 3
+            self.sr_speed_multiplier = 1.0
+            self.sr_spawn_counter = 0
+            self.sr_active_targets.clear()
+            self.sr_canvas.delete("all")
+            
+            self.lbl_score.configure(text="0")
+            self.lbl_lives.configure(text="❤️ ❤️ ❤️")
+            self.btn_sr_start.configure(state="disabled", text="ĐANG CHƠI...", fg_color=COLORS["stroke"])
+            self.sr_canvas.config(bg="#080C11")
+            
+            if not self.sr_cap:
+                import os
+                self.sr_cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(0)
+                self.sr_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                self.sr_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+            game_loop()
+            camera_loop()
+
+        self.btn_sr_start.configure(command=start_game)
     # ---------- Word game ----------
     # ---------- CỖ MÁY MINIGAME: GHÉP TỪ (TIME ATTACK) ----------
     def _stop_word_timer(self):
@@ -854,17 +994,45 @@ class MinigameFrame(ctk.CTkFrame):
         card.grid(row=0, column=0, sticky="nsew", padx=150, pady=80)
         card.grid_columnconfigure(0, weight=1)
         
-        ctk.CTkLabel(card, text="⏰", font=(FONT, 100)).pack(pady=(60, 20))
+        ctk.CTkLabel(card, text="⏰", font=(FONT, 100)).pack(pady=(40, 10)) # Đã tinh chỉnh lại padding cho cân đối
         ctk.CTkLabel(card, text="HẾT GIỜ!", font=(FONT, 36, "bold"), text_color=COLORS["red"]).pack(pady=(0, 10))
         
         correct_count = len([x for x in self.word_history if x[1]])
-        ctk.CTkLabel(card, text=f"Bạn đã chiến đấu kiên cường và ghép đúng {correct_count} từ.", font=(FONT, 18), text_color=COLORS["muted"]).pack(pady=(0, 30))
+        ctk.CTkLabel(card, text=f"Bạn đã chiến đấu kiên cường và ghép đúng {correct_count} từ.", font=(FONT, 18), text_color=COLORS["muted"]).pack(pady=(0, 20))
         
         score_box = ctk.CTkFrame(card, fg_color="#080C11", corner_radius=16)
-        score_box.pack(pady=(0, 40))
+        score_box.pack(pady=(0, 20))
         ctk.CTkLabel(score_box, text="Tổng Điểm Kỷ Lục", font=(FONT, 16), text_color=COLORS["muted"]).pack(pady=(20, 0))
         ctk.CTkLabel(score_box, text=f"🏆 {self.word_score}", font=(FONT, 48, "bold"), text_color=COLORS["yellow"]).pack(padx=60, pady=(0, 20))
         
+        # ==========================================================
+        # XỬ LÝ LƯU DATABASE & GỢI Ý ĐĂNG NHẬP 
+        # ==========================================================
+        def login_and_save(score):
+            """Hành vi tạm lưu điểm vào RAM và gọi form Đăng nhập"""
+            self.pending_save_score = score
+            self._trigger_login_flow()
+
+        db_frame = ctk.CTkFrame(card, fg_color="transparent")
+        db_frame.pack(pady=(0, 30))
+
+        if self.current_user_id:
+            try:
+                db = self._get_db()
+                if db and hasattr(db, 'get_conn'):
+                    conn = db.get_conn()
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE TaiKhoan SET DiemSo = ISNULL(DiemSo, 0) + ? WHERE ID = ?", (self.word_score, self.current_user_id))
+                    cursor.execute("UPDATE TaiKhoan SET TongSoLanTap = ISNULL(TongSoLanTap, 0) + 1 WHERE ID = ?", (self.current_user_id,))
+                    conn.commit()
+                    ctk.CTkLabel(db_frame, text="✅ Đã lưu kết quả vào hệ thống!", font=(FONT, 16, "bold"), text_color=COLORS["green"]).pack()
+            except Exception as e:
+                print("Lỗi lưu điểm game ghép từ:", e)
+        else:
+            ctk.CTkLabel(db_frame, text="🔒 Bạn chưa đăng nhập. Điểm này chưa được lưu!", font=(FONT, 15), text_color=COLORS["orange"]).pack(pady=(0, 12))
+            ctk.CTkButton(db_frame, text="👤 Đăng nhập để lưu điểm", font=(FONT, 15, "bold"), fg_color=COLORS["blue"], hover_color="#0B62D5", height=40, command=lambda: login_and_save(self.word_score)).pack()
+        # ==========================================================
+
         btn_frame = ctk.CTkFrame(card, fg_color="transparent")
         btn_frame.pack()
         ctk.CTkButton(btn_frame, text="⟳ Chơi lại", font=(FONT, 18, "bold"), height=54, width=180, fg_color=COLORS["blue"], command=self.start_word_game).pack(side="left", padx=10)
@@ -943,7 +1111,7 @@ class MinigameFrame(ctk.CTkFrame):
             
         status_bar = ctk.CTkFrame(game, fg_color="transparent")
         status_bar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 0))
-        ctk.CTkLabel(status_bar, text="❤️ " * self.react_lives + "🖤 " * (3 - self.react_lives), font=(FONT, 24), text_color=COLORS["red"]).pack(side="left")
+        ctk.CTkLabel(status_bar, text="❤️ " * max(0, self.react_lives), font=(FONT, 24), text_color=COLORS["red"]).pack(side="left")
         ctk.CTkLabel(status_bar, text=f"💰 {self.react_score} Xu", font=(FONT, 24, "bold"), text_color=COLORS["yellow"]).pack(side="right")
         
         prog_color = COLORS["orange"] if self.react_frenzy else COLORS["blue"]
@@ -1018,13 +1186,43 @@ class MinigameFrame(ctk.CTkFrame):
         card.grid(row=0, column=0, sticky="nsew", padx=150, pady=80)
         card.grid_columnconfigure(0, weight=1)
         
-        ctk.CTkLabel(card, text="💥", font=(FONT, 100)).pack(pady=(60, 20))
+        ctk.CTkLabel(card, text="💥", font=(FONT, 100)).pack(pady=(40, 10))
         ctk.CTkLabel(card, text="GAME OVER", font=(FONT, 36, "bold"), text_color=COLORS["red"]).pack(pady=(0, 10))
         
+        ctk.CTkLabel(card, text="Tốc độ phản xạ của bạn thật đáng kinh ngạc!", font=(FONT, 18), text_color=COLORS["muted"]).pack(pady=(0, 20))
+        
         score_box = ctk.CTkFrame(card, fg_color="#080C11", corner_radius=16)
-        score_box.pack(pady=(20, 40))
+        score_box.pack(pady=(0, 20))
         ctk.CTkLabel(score_box, text="Điểm Phản Xạ Kỷ Lục", font=(FONT, 16), text_color=COLORS["muted"]).pack(pady=(20, 0))
         ctk.CTkLabel(score_box, text=f"💰 {self.react_score}", font=(FONT, 48, "bold"), text_color=COLORS["orange"]).pack(padx=60, pady=(0, 20))
+        
+        # ==========================================================
+        # XỬ LÝ LƯU DATABASE & GỢI Ý ĐĂNG NHẬP 
+        # ==========================================================
+        def login_and_save(score):
+            """Hành vi tạm lưu điểm vào RAM và gọi form Đăng nhập"""
+            self.pending_save_score = score
+            self._trigger_login_flow()
+
+        db_frame = ctk.CTkFrame(card, fg_color="transparent")
+        db_frame.pack(pady=(0, 30))
+
+        if self.current_user_id:
+            try:
+                db = self._get_db()
+                if db and hasattr(db, 'get_conn'):
+                    conn = db.get_conn()
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE TaiKhoan SET DiemSo = ISNULL(DiemSo, 0) + ? WHERE ID = ?", (self.react_score, self.current_user_id))
+                    cursor.execute("UPDATE TaiKhoan SET TongSoLanTap = ISNULL(TongSoLanTap, 0) + 1 WHERE ID = ?", (self.current_user_id,))
+                    conn.commit()
+                    ctk.CTkLabel(db_frame, text="✅ Đã lưu kết quả vào hệ thống!", font=(FONT, 16, "bold"), text_color=COLORS["green"]).pack()
+            except Exception as e:
+                print("Lỗi lưu điểm game phản xạ:", e)
+        else:
+            ctk.CTkLabel(db_frame, text="🔒 Bạn chưa đăng nhập. Điểm này chưa được lưu!", font=(FONT, 15), text_color=COLORS["orange"]).pack(pady=(0, 12))
+            ctk.CTkButton(db_frame, text="👤 Đăng nhập để lưu điểm", font=(FONT, 15, "bold"), fg_color=COLORS["blue"], hover_color="#0B62D5", height=40, command=lambda: login_and_save(self.react_score)).pack()
+        # ==========================================================
         
         btn_frame = ctk.CTkFrame(card, fg_color="transparent")
         btn_frame.pack()
@@ -1032,144 +1230,429 @@ class MinigameFrame(ctk.CTkFrame):
         ctk.CTkButton(btn_frame, text="🏠 Menu", font=(FONT, 18, "bold"), height=54, width=180, fg_color=COLORS["card"], command=self.show_dashboard).pack(side="left", padx=10)
 
     # =========================================================================
-    # CỖ MÁY MINIGAME 4: TRẮC NGHIỆM KIẾN THỨC (HIGH STAKES / BETTING)
+    # CỖ MÁY MINIGAME 4: GIẢI MÃ KÉT SẮT (ESCAPE ROOM / PUZZLE)
     # =========================================================================
-    def start_quiz_game(self):
-        self.quiz_bank = 100 # Cho sẵn vốn khởi nghiệp
-        self.quiz_round = 1
+    def show_safecracker_game(self):
+        # 1. Dọn dẹp timer
+        if hasattr(self, '_stop_word_timer'): self._stop_word_timer()
+        if hasattr(self, '_stop_reaction_timer'): self._stop_reaction_timer()
         
-        import random
-        try:
-            from .data import ALPHABET
-            self.quiz_pool = [str(item.get("label", item)).replace("Chữ ", "").strip().upper() for item in ALPHABET if len(str(item.get("label", item)).replace("Chữ ", "").strip()) == 1]
-        except:
-            self.quiz_pool = list("ABCDEGHIJKLMNOPQRSTUVXY")
-            
-        self.show_quiz_betting()
-
-    def show_quiz_betting(self):
-        if self.quiz_bank <= 0:
-            self.show_quiz_game_over()
-            return
-            
-        self.current_screen = "quiz_bet"
+        # 2. Setup state
+        self.sc_is_playing = False
+        self.sc_score = 0
+        self.sc_time_left = 60 # 60 giây sinh tử để giải càng nhiều két càng tốt
+        self.sc_current_word = ""
+        self.sc_current_hint = ""
+        self.sc_unlocked_chars = []
+        self.sc_cap = None
+        self.sc_camera_after_id = None
+        self.sc_game_after_id = None
+        
+        # Biến AI
+        self.sequence_data = []
+        self.prev_wx = None
+        self.prev_wy = None
+        self.mp_hands = None
+        self.mp_draw = None
+        self.ai_session = None
+        self.ai_labels = None
+        
+        # Kho câu đố (Viết không dấu để AI nhận diện bộ chữ VSL cơ bản)
+        self.sc_word_pool = [
+            ("Trái nghĩa với ĐEN", "TRANG"),
+            ("Thủ đô của Việt Nam", "HANOI"),
+            ("Động vật kêu meo meo", "MEO"),
+            ("Màu của bầu trời", "XANH"),
+            ("Môn thể thao Vua", "BONGDA"),
+            ("Nơi chứa nhiều sách", "THUVIEN"),
+            ("Hành tinh chúng ta đang sống", "TRAIDAT"),
+            ("Loài hoa biểu tượng của Hà Lan", "TULIP"),
+            ("Mùa nóng nhất trong năm", "MUAHE"),
+            ("Người sinh ra bạn (Nữ)", "ME")
+        ]
+        
+        # 3. Dựng Giao Diện
+        self.current_screen = "safecracker"
         self.clear_content()
         page = self._page()
-        page.grid_columnconfigure(0, weight=1)
-        page.grid_rowconfigure(0, weight=1)
         
-        card = ctk.CTkFrame(page, fg_color=COLORS["panel"], corner_radius=20, border_color=COLORS["stroke"], border_width=1)
-        card.grid(row=0, column=0, sticky="nsew", padx=150, pady=80)
-        card.grid_columnconfigure(0, weight=1)
+        header = ctk.CTkFrame(page, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 14))
+        header.grid_columnconfigure(0, weight=1)
         
-        ctk.CTkLabel(card, text="⚖️ VÒNG " + str(self.quiz_round), font=(FONT, 28, "bold"), text_color=COLORS["blue"]).pack(pady=(40, 10))
-        ctk.CTkLabel(card, text="Đấu Trường Triệu Phú", font=(FONT, 16), text_color=COLORS["muted"]).pack()
+        ctk.CTkLabel(header, text="GIẢI MÃ KÉT SẮT 🔐", font=(FONT, 30, "bold"), text_color=COLORS["text"]).grid(row=0, column=0, sticky="w")
         
-        ctk.CTkLabel(card, text=f"Tài sản: 💰 {self.quiz_bank} Xu", font=(FONT, 36, "bold"), text_color=COLORS["yellow"]).pack(pady=(30, 20))
-        ctk.CTkLabel(card, text="Bạn muốn cược bao nhiêu Xu cho câu hỏi tiếp theo?", font=(FONT, 18), text_color=COLORS["text"]).pack(pady=(0, 20))
-        
-        bet_frame = ctk.CTkFrame(card, fg_color="transparent")
-        bet_frame.pack()
-        
-        # Mệnh giá cược
-        bets = [10, 25, 50, self.quiz_bank]
-        for b in bets:
-            if b <= self.quiz_bank:
-                txt = f"Cược {b}" if b < self.quiz_bank else "🎲 ALL IN!"
-                color = COLORS["blue"] if b < self.quiz_bank else COLORS["red"]
-                ctk.CTkButton(bet_frame, text=txt, font=(FONT, 18, "bold"), height=54, fg_color=color, hover_color=COLORS["card_hover"], command=lambda bet=b: self._start_quiz_question(bet)).pack(side="left", padx=10)
-                
-        ctk.CTkButton(card, text="Chốt lời & Nghỉ chơi", font=(FONT, 16, "bold"), fg_color="transparent", text_color=COLORS["muted"], hover_color=COLORS["card"], command=self.show_quiz_game_over).pack(pady=(40, 0))
+        def go_back():
+            self.sc_is_playing = False
+            if self.sc_cap: self.sc_cap.release()
+            if self.sc_camera_after_id: self.after_cancel(self.sc_camera_after_id)
+            if self.sc_game_after_id: self.after_cancel(self.sc_game_after_id)
+            self.show_dashboard()
+            
+        ctk.CTkButton(header, text="← Trở về", font=(FONT, 15, "bold"), fg_color=COLORS["panel"], hover_color=COLORS["stroke"], height=40, command=go_back).grid(row=0, column=1, sticky="e", padx=20)
 
-    def _start_quiz_question(self, bet_amount):
-        self.current_bet = bet_amount
-        import random
-        self.quiz_target = random.choice(self.quiz_pool)
-        distractors = random.sample([x for x in self.quiz_pool if x != self.quiz_target], 3)
-        self.quiz_choices = distractors + [self.quiz_target]
-        random.shuffle(self.quiz_choices)
-        self.show_quiz_game()
-
-    def show_quiz_game(self):
-        self.current_screen = "quiz_game"
-        self.clear_content()
-        page = self._page()
-        self._header(page, "TRẮC NGHIỆM (HIGH STAKES)", f"Tiền cược: 💰 {self.current_bet} Xu. Đúng ăn gấp đôi, Sai mất trắng!")
-        
         body = self._game_body(page)
-        game = self._panel(body, row=0, column=0, sticky="nsew")
-        game.grid_columnconfigure((0, 1), weight=1)
         
-        ctk.CTkLabel(game, text="Ký hiệu này là chữ gì?", font=(FONT, 24, "bold")).grid(row=0, column=0, columnspan=2, pady=20)
+        # --- CỘT TRÁI - GIAO DIỆN KÉT SẮT ---
+        game_board = ctk.CTkFrame(body, fg_color="#0A1118", border_color=COLORS["stroke"], border_width=2, corner_radius=16)
+        game_board.grid(row=0, column=0, sticky="nsew")
+        game_board.grid_columnconfigure(0, weight=1)
         
-        img_box = ctk.CTkFrame(game, fg_color="#0D1424", corner_radius=16)
-        img_box.grid(row=1, column=0, columnspan=2, pady=10)
-        real_img = getattr(self, '_get_real_image', lambda c, s: None)(self.quiz_target, size=(200, 200))
-        if real_img: ctk.CTkLabel(img_box, text="", image=real_img).pack(padx=30, pady=30)
-        else: ctk.CTkLabel(img_box, text="?", font=(FONT, 60)).pack(padx=60, pady=60)
-            
-        self.quiz_buttons = []
-        for idx, val in enumerate(self.quiz_choices):
-            btn = ctk.CTkButton(
-                game, text=f"Chữ {val}", height=60, corner_radius=12,
-                fg_color=COLORS["card"], hover_color=COLORS["card_hover"],
-                font=(FONT, 20, "bold"), text_color=COLORS["text"]
-            )
-            btn.grid(row=2 + idx // 2, column=idx % 2, sticky="ew", padx=15, pady=10)
-            btn.configure(command=lambda b=btn, v=val: self._check_quiz_answer(b, v))
-            self.quiz_buttons.append(btn)
-            
-        side_panel = self._panel(body, row=0, column=1, sticky="nsew", padx=(14, 0))
-        self._small_score(side_panel, "🏦", "Vốn hiện tại", str(self.quiz_bank), "green").pack(fill="x", padx=16, pady=20)
-        self._small_score(side_panel, "🎲", "Đang cược", str(self.current_bet), "orange").pack(fill="x", padx=16, pady=6)
+        ctk.CTkLabel(game_board, text="Mật mã Két Sắt", font=(FONT, 20, "bold"), text_color=COLORS["muted"]).pack(pady=(30, 5))
+        self.lbl_sc_hint = ctk.CTkLabel(game_board, text="Gợi ý: ...", font=(FONT, 24, "bold"), text_color=COLORS["blue_2"], wraplength=400, justify="center")
+        self.lbl_sc_hint.pack(pady=(0, 20))
         
-        self._bottom_controls(body, [("✕  Bỏ chạy (Mất tiền cược)", "red", self.show_quiz_betting)])
+        # BÍ KÍP: HIỆU ỨNG BOM NỔ CHẬM
+        self.sc_timer_bar = ctk.CTkProgressBar(game_board, height=10, progress_color=COLORS["green"], fg_color="#2A3038", corner_radius=5)
+        self.sc_timer_bar.pack(fill="x", padx=80, pady=(0, 20))
+        self.sc_timer_bar.set(1.0)
+        
+        self.sc_slots_frame = ctk.CTkFrame(game_board, fg_color="transparent")
+        self.sc_slots_frame.pack(pady=10)
+        
+        self.lbl_sc_status = ctk.CTkLabel(game_board, text="Hãy làm ký hiệu để nhập từng chữ cái!", font=(FONT, 16), text_color=COLORS["orange"])
+        self.lbl_sc_status.pack(pady=10)
+        
+        # BÍ KÍP: CỬA HÀNG HACKER
+        shop_frame = ctk.CTkFrame(game_board, fg_color="transparent")
+        shop_frame.pack(side="bottom", fill="x", pady=25)
+        
+        ctk.CTkLabel(shop_frame, text="🛒 Cửa hàng Hacker (Dùng Tiền Thưởng)", font=(FONT, 14, "bold"), text_color=COLORS["muted"]).pack(pady=(0, 10))
+        shop_btns = ctk.CTkFrame(shop_frame, fg_color="transparent")
+        shop_btns.pack()
 
-    def _check_quiz_answer(self, btn, selected_val):
-        for b in self.quiz_buttons: b.configure(state="disabled")
+        # --- CỘT PHẢI - CAMERA & THỐNG KÊ ---
+        right_panel = self._panel(body, row=0, column=1, sticky="nsew", padx=(14, 0))
         
-        if selected_val == self.quiz_target:
-            self.quiz_bank += self.current_bet # Thắng cược
-            btn.configure(fg_color="#17351F", border_color=COLORS["green"])
-            self.quiz_round += 1
-            self.after(1000, self.show_quiz_betting)
-        else:
-            self.quiz_bank -= self.current_bet # Thua cược
-            btn.configure(fg_color="#451A1F", border_color=COLORS["red"])
-            for b in self.quiz_buttons:
-                if b.cget("text") == f"Chữ {self.quiz_target}":
-                    b.configure(fg_color="#17351F", border_color=COLORS["green"])
-            self.quiz_round += 1
-            self.after(1500, self.show_quiz_betting)
-
-    def show_quiz_game_over(self):
-        self.current_screen = "quiz_game_over"
-        self.clear_content()
-        page = self._page()
-        page.grid_columnconfigure(0, weight=1)
-        page.grid_rowconfigure(0, weight=1)
+        stats_frame = ctk.CTkFrame(right_panel, fg_color=COLORS["card"], corner_radius=16)
+        stats_frame.pack(fill="x", padx=16, pady=16)
         
-        card = ctk.CTkFrame(page, fg_color=COLORS["panel"], corner_radius=20, border_color=COLORS["stroke"], border_width=1)
-        card.grid(row=0, column=0, sticky="nsew", padx=150, pady=80)
-        card.grid_columnconfigure(0, weight=1)
+        score_row = ctk.CTkFrame(stats_frame, fg_color="transparent")
+        score_row.pack(fill="x", padx=20, pady=(20, 5))
+        ctk.CTkLabel(score_row, text="Tiền thưởng:", font=(FONT, 18, "bold"), text_color=COLORS["text"]).pack(side="left")
+        self.lbl_sc_score = ctk.CTkLabel(score_row, text="0", font=(FONT, 28, "bold"), text_color=COLORS["yellow"])
+        self.lbl_sc_score.pack(side="right")
         
-        if self.quiz_bank <= 0:
-            ctk.CTkLabel(card, text="💸", font=(FONT, 100)).pack(pady=(60, 20))
-            ctk.CTkLabel(card, text="PHÁ SẢN!", font=(FONT, 36, "bold"), text_color=COLORS["red"]).pack(pady=(0, 10))
-        else:
-            ctk.CTkLabel(card, text="👑", font=(FONT, 100)).pack(pady=(60, 20))
-            ctk.CTkLabel(card, text="CHỐT LỜI THÀNH CÔNG", font=(FONT, 36, "bold"), text_color=COLORS["green"]).pack(pady=(0, 10))
+        time_row = ctk.CTkFrame(stats_frame, fg_color="transparent")
+        time_row.pack(fill="x", padx=20, pady=(5, 20))
+        ctk.CTkLabel(time_row, text="Thời gian:", font=(FONT, 18, "bold"), text_color=COLORS["text"]).pack(side="left")
+        self.lbl_sc_time = ctk.CTkLabel(time_row, text="00:00", font=(FONT, 22, "bold"), text_color=COLORS["purple"])
+        self.lbl_sc_time.pack(side="right")
+        
+        cam_frame = ctk.CTkFrame(right_panel, fg_color=COLORS["panel_2"], corner_radius=16)
+        cam_frame.pack(fill="x", padx=16, pady=(0, 16))
+        ctk.CTkLabel(cam_frame, text="Camera AI", font=(FONT, 16, "bold"), text_color=COLORS["blue_2"]).pack(pady=(15, 5))
+        
+        self.sc_video_label = ctk.CTkLabel(cam_frame, text="📷 Đang chờ...", height=200, fg_color="#05080D", corner_radius=12)
+        self.sc_video_label.pack(fill="x", padx=15, pady=(0, 15))
+        
+        self.lbl_sc_detect = ctk.CTkLabel(cam_frame, text="AI Đang thấy: --", font=(FONT, 16, "bold"), text_color=COLORS["green"])
+        self.lbl_sc_detect.pack(pady=(0, 15))
+        
+        self.btn_sc_start = ctk.CTkButton(right_panel, text="▶ BẮT ĐẦU GIẢI MÃ", font=(FONT, 18, "bold"), height=60, corner_radius=16, fg_color=COLORS["blue"], hover_color="#0B62D5")
+        self.btn_sc_start.pack(fill="x", side="bottom", padx=16, pady=16)
+        
+        # ==========================================
+        # CÁC HÀM LOGIC XỬ LÝ BÊN TRONG
+        # ==========================================
+        def load_ai():
+            import mediapipe as mp
+            import numpy as np
+            import onnxruntime as ort
+            import os
             
-        ctk.CTkLabel(card, text=f"Bạn đã rời khỏi sàn đấu với tài sản:", font=(FONT, 18), text_color=COLORS["muted"]).pack(pady=(0, 30))
-        
-        score_box = ctk.CTkFrame(card, fg_color="#080C11", corner_radius=16)
-        score_box.pack(pady=(0, 40))
-        ctk.CTkLabel(score_box, text=f"💰 {self.quiz_bank} Xu", font=(FONT, 54, "bold"), text_color=COLORS["yellow"]).pack(padx=80, pady=20)
-        
-        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
-        btn_frame.pack()
-        ctk.CTkButton(btn_frame, text="⟳ Khởi nghiệp lại", font=(FONT, 18, "bold"), height=54, width=200, fg_color=COLORS["blue"], command=self.start_quiz_game).pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame, text="🏠 Về Menu", font=(FONT, 18, "bold"), height=54, width=180, fg_color=COLORS["card"], command=self.show_dashboard).pack(side="left", padx=10)
+            if not self.mp_hands:
+                self.mp_hands = mp.solutions.hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
+                self.mp_draw = mp.solutions.drawing_utils
+                
+            if not self.ai_session:
+                try:
+                    model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'model', 'model.onnx'))
+                    label_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'model', 'labels.npy'))
+                    if not os.path.exists(model_path): model_path = "model/model.onnx"
+                    if not os.path.exists(label_path): label_path = "model/labels.npy"
+                    
+                    self.ai_session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+                    self.ai_labels = np.load(label_path)
+                    return True
+                except: return False
+            return True
+
+        def hand_vectorlize(landmarks, hand_type, prev_wx, prev_wy):
+            import numpy as np
+            wx, wy = landmarks[0].x, landmarks[0].y
+            vector = []
+            for i in range(1, 21): vector.extend([landmarks[i].x - wx, landmarks[i].y - wy])
+            vector.extend([hand_type, (wx - prev_wx)*30 if prev_wx else 0.0, (wy - prev_wy)*30 if prev_wy else 0.0])
+            return np.array(vector), wx, wy
+            
+        def render_slots():
+            for w in self.sc_slots_frame.winfo_children(): w.destroy()
+            for i, char in enumerate(self.sc_current_word):
+                if i < len(self.sc_unlocked_chars):
+                    slot = ctk.CTkFrame(self.sc_slots_frame, width=60, height=70, fg_color=COLORS["green"], corner_radius=8)
+                    slot.pack(side="left", padx=5)
+                    slot.pack_propagate(False)
+                    ctk.CTkLabel(slot, text=char, font=(FONT, 32, "bold"), text_color="white").place(relx=0.5, rely=0.5, anchor="center")
+                elif i == len(self.sc_unlocked_chars):
+                    slot = ctk.CTkFrame(self.sc_slots_frame, width=60, height=70, fg_color=COLORS["panel"], border_color=COLORS["orange"], border_width=2, corner_radius=8)
+                    slot.pack(side="left", padx=5)
+                    slot.pack_propagate(False)
+                    ctk.CTkLabel(slot, text="_", font=(FONT, 32, "bold"), text_color=COLORS["orange"]).place(relx=0.5, rely=0.5, anchor="center")
+                else:
+                    slot = ctk.CTkFrame(self.sc_slots_frame, width=60, height=70, fg_color=COLORS["panel"], border_color=COLORS["stroke"], border_width=1, corner_radius=8)
+                    slot.pack(side="left", padx=5)
+                    slot.pack_propagate(False)
+                    ctk.CTkLabel(slot, text="", font=(FONT, 32, "bold"), text_color=COLORS["muted"]).place(relx=0.5, rely=0.5, anchor="center")
+
+        def resume_after_success():
+            self.sc_is_playing = True
+            load_next_puzzle()
+            camera_loop()
+
+        def check_win_condition():
+            if len(self.sc_unlocked_chars) == len(self.sc_current_word):
+                self.sc_score += 50
+                self.sc_time_left += 15 # Tặng thêm 15 giây
+                self.lbl_sc_score.configure(text=str(self.sc_score))
+                self.lbl_sc_status.configure(text="🎉 MỞ KÉT THÀNH CÔNG! +50 Xu, +15s", text_color=COLORS["green"])
+                
+                self.sc_is_playing = False
+                self.after(1500, resume_after_success)
+            else:
+                next_char = self.sc_current_word[len(self.sc_unlocked_chars)]
+                self.lbl_sc_status.configure(text=f"Tuyệt! Giơ tiếp chữ cái: {next_char}", text_color=COLORS["blue_2"])
+
+        def load_next_puzzle():
+            import random
+            puzzle = random.choice(self.sc_word_pool)
+            self.sc_current_hint = puzzle[0]
+            self.sc_current_word = puzzle[1]
+            
+            # --- BÍ KÍP 1: KHỞI ĐẦU NHÂN ĐẠO ---
+            self.sc_unlocked_chars = [self.sc_current_word[0]] 
+            
+            self.lbl_sc_hint.configure(text=f"💡 {self.sc_current_hint}")
+            if len(self.sc_unlocked_chars) < len(self.sc_current_word):
+                next_char = self.sc_current_word[len(self.sc_unlocked_chars)]
+                self.lbl_sc_status.configure(text=f"Hãy giơ tay làm ký hiệu chữ cái: {next_char}", text_color=COLORS["orange"])
+            render_slots()
+
+        # --- LOGIC CỬA HÀNG HACKER ---
+        def buy_hint():
+            if not self.sc_is_playing: return
+            if self.sc_score >= 20:
+                self.sc_score -= 20
+                self.lbl_sc_score.configure(text=str(self.sc_score))
+                target_idx = len(self.sc_unlocked_chars)
+                if target_idx < len(self.sc_current_word):
+                    self.sc_unlocked_chars.append(self.sc_current_word[target_idx])
+                    self.sequence_data.clear()
+                    render_slots()
+                    check_win_condition()
+            else:
+                from tkinter import messagebox
+                messagebox.showwarning("Thiếu Xu", "Bạn không đủ 20 xu để mua tính năng này!")
+
+        def buy_time():
+            if not self.sc_is_playing: return
+            if self.sc_score >= 30:
+                self.sc_score -= 30
+                self.lbl_sc_score.configure(text=str(self.sc_score))
+                self.sc_time_left += 15
+            else:
+                from tkinter import messagebox
+                messagebox.showwarning("Thiếu Xu", "Bạn không đủ 30 xu để mua tính năng này!")
+
+        def buy_skip():
+            if not self.sc_is_playing: return
+            if self.sc_score >= 15:
+                self.sc_score -= 15
+                self.lbl_sc_score.configure(text=str(self.sc_score))
+                load_next_puzzle()
+            else:
+                from tkinter import messagebox
+                messagebox.showwarning("Thiếu Xu", "Bạn không đủ 15 xu để mua tính năng này!")
+
+        # Gắn nút cửa hàng
+        ctk.CTkButton(shop_btns, text="💡 Lật 1 chữ\n-20 Xu", font=(FONT, 14, "bold"), height=50, fg_color="#122A4F", hover_color="#1A3B6E", border_width=1, border_color=COLORS["blue"], command=buy_hint).pack(side="left", padx=8)
+        ctk.CTkButton(shop_btns, text="⏳ +15 Giây\n-30 Xu", font=(FONT, 14, "bold"), height=50, fg_color="#451A1F", hover_color="#63252C", border_width=1, border_color=COLORS["red"], command=buy_time).pack(side="left", padx=8)
+        ctk.CTkButton(shop_btns, text="🔄 Đổi Két\n-15 Xu", font=(FONT, 14, "bold"), height=50, fg_color="#332200", hover_color="#4D3300", border_width=1, border_color=COLORS["orange"], command=buy_skip).pack(side="left", padx=8)
+
+        def login_and_save(score):
+            self.pending_save_score = score
+            self._trigger_login_flow()
+
+        def game_over():
+            self.sc_is_playing = False
+            if self.sc_cap:
+                self.sc_cap.release()
+                self.sc_cap = None
+            if hasattr(self, 'sc_video_label') and self.sc_video_label.winfo_exists():
+                self.sc_video_label.configure(image="", text="Đã tắt Camera")
+                
+            self.current_screen = "safecracker_game_over"
+            self.clear_content()
+            page = self._page()
+            page.grid_columnconfigure(0, weight=1)
+            page.grid_rowconfigure(0, weight=1)
+            
+            card = ctk.CTkFrame(page, fg_color=COLORS["panel"], corner_radius=20, border_color=COLORS["stroke"], border_width=1)
+            card.grid(row=0, column=0, sticky="nsew", padx=150, pady=80)
+            card.grid_columnconfigure(0, weight=1)
+            
+            ctk.CTkLabel(card, text="🔐", font=(FONT, 100)).pack(pady=(40, 10))
+            ctk.CTkLabel(card, text="HẾT GIỜ", font=(FONT, 36, "bold"), text_color=COLORS["red"]).pack(pady=(0, 10))
+            ctk.CTkLabel(card, text="Két sắt đã bị khóa chặt. Bạn đã thu thập được:", font=(FONT, 18), text_color=COLORS["muted"]).pack(pady=(0, 20))
+            
+            score_box = ctk.CTkFrame(card, fg_color="#080C11", corner_radius=16)
+            score_box.pack(pady=(0, 20))
+            ctk.CTkLabel(score_box, text="Tiền thưởng Kỷ Lục", font=(FONT, 16), text_color=COLORS["muted"]).pack(pady=(20, 0))
+            ctk.CTkLabel(score_box, text=f"💰 {self.sc_score} Xu", font=(FONT, 48, "bold"), text_color=COLORS["yellow"]).pack(padx=60, pady=(0, 20))
+            
+            # XỬ LÝ DATABASE & ĐĂNG NHẬP
+            db_frame = ctk.CTkFrame(card, fg_color="transparent")
+            db_frame.pack(pady=(0, 30))
+
+            if self.current_user_id:
+                try:
+                    db = self._get_db()
+                    if db and hasattr(db, 'get_conn'):
+                        conn = db.get_conn()
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE TaiKhoan SET DiemSo = ISNULL(DiemSo, 0) + ? WHERE ID = ?", (self.sc_score, self.current_user_id))
+                        cursor.execute("UPDATE TaiKhoan SET TongSoLanTap = ISNULL(TongSoLanTap, 0) + 1 WHERE ID = ?", (self.current_user_id,))
+                        conn.commit()
+                        ctk.CTkLabel(db_frame, text="✅ Đã lưu kết quả vào hệ thống!", font=(FONT, 16, "bold"), text_color=COLORS["green"]).pack()
+                except Exception as e: print("Lỗi lưu điểm game két sắt:", e)
+            else:
+                ctk.CTkLabel(db_frame, text="🔒 Bạn chưa đăng nhập. Điểm này chưa được lưu!", font=(FONT, 15), text_color=COLORS["orange"]).pack(pady=(0, 12))
+                ctk.CTkButton(db_frame, text="👤 Đăng nhập để lưu điểm", font=(FONT, 15, "bold"), fg_color=COLORS["blue"], hover_color="#0B62D5", height=40, command=lambda: login_and_save(self.sc_score)).pack()
+
+            btn_frame = ctk.CTkFrame(card, fg_color="transparent")
+            btn_frame.pack()
+            ctk.CTkButton(btn_frame, text="⟳ Chơi lại", font=(FONT, 18, "bold"), height=54, width=180, fg_color=COLORS["blue"], command=self.show_safecracker_game).pack(side="left", padx=10)
+            ctk.CTkButton(btn_frame, text="🏠 Về Menu", font=(FONT, 18, "bold"), height=54, width=180, fg_color=COLORS["card"], hover_color=COLORS["card_hover"], command=self.show_dashboard).pack(side="left", padx=10)
+
+
+        def timer_loop():
+            if not self.sc_is_playing: return
+            if self.sc_time_left > 0:
+                self.sc_time_left -= 1
+                if hasattr(self, 'lbl_sc_time') and self.lbl_sc_time.winfo_exists():
+                    self.lbl_sc_time.configure(text=f"00:{self.sc_time_left:02d}")
+                    
+                    # --- BÍ KÍP 2: UPDATE MÀU SẮC DỰA TRÊN ĐỒNG HỒ ---
+                    ratio = min(1.0, self.sc_time_left / 60.0)
+                    self.sc_timer_bar.set(ratio)
+                    
+                    if self.sc_time_left > 30: color = COLORS["green"]
+                    elif self.sc_time_left > 10: color = COLORS["orange"]
+                    else: color = COLORS["red"]
+                        
+                    self.lbl_sc_time.configure(text_color=color)
+                    self.sc_timer_bar.configure(progress_color=color)
+                    
+                self.sc_game_after_id = self.after(1000, timer_loop)
+            else:
+                game_over()
+
+        def camera_loop():
+            if not self.sc_is_playing or not self.sc_cap: return
+            import cv2
+            from PIL import Image
+            import numpy as np
+            import mediapipe as mp
+
+            success, frame = self.sc_cap.read()
+            if success:
+                frame = cv2.flip(frame, 1)
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                predicted_char = ""
+                confidence = 0.0
+
+                if self.mp_hands:
+                    results = self.mp_hands.process(frame_rgb)
+                    if results.multi_hand_landmarks:
+                        for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+                            self.mp_draw.draw_landmarks(frame, hand_landmarks, mp.solutions.hands.HAND_CONNECTIONS)
+                            hand_type = 0 if handedness.classification[0].label == "Left" else 1
+                            vector, self.prev_wx, self.prev_wy = hand_vectorlize(hand_landmarks.landmark, hand_type, self.prev_wx, self.prev_wy)
+                            self.sequence_data.append(vector)
+                            
+                            if len(self.sequence_data) > 30: self.sequence_data.pop(0)
+                            if len(self.sequence_data) == 30 and self.ai_session:
+                                try:
+                                    input_data = np.expand_dims(self.sequence_data, axis=0).astype(np.float32)
+                                    out = self.ai_session.run(None, {self.ai_session.get_inputs()[0].name: input_data})[0][0]
+                                    max_idx = np.argmax(out)
+                                    confidence = float(out[max_idx])
+                                    if confidence > 0.70:
+                                        predicted_char = str(self.ai_labels[max_idx]).upper()
+                                except: pass
+                    else:
+                        self.sequence_data.clear()
+                        self.prev_wx = self.prev_wy = None
+
+                if predicted_char:
+                    self.lbl_sc_detect.configure(text=f"AI Đang thấy: {predicted_char} ({int(confidence*100)}%)", text_color=COLORS["green"])
+                else:
+                    self.lbl_sc_detect.configure(text="AI Đang thấy: --", text_color=COLORS["muted"])
+
+                # KIỂM TRA MẬT MÃ
+                if predicted_char and confidence > 0.75:
+                    target_char_idx = len(self.sc_unlocked_chars)
+                    if target_char_idx < len(self.sc_current_word):
+                        needed_char = self.sc_current_word[target_char_idx]
+                        
+                        if predicted_char == needed_char:
+                            self.sc_unlocked_chars.append(needed_char)
+                            self.sequence_data.clear()
+                            render_slots()
+                            check_win_condition() # Tái sử dụng logic kiểm tra Win
+
+                h, w = frame.shape[:2]
+                scale = min(320/w, 200/h)
+                new_w, new_h = max(1, int(w*scale)), max(1, int(h*scale))
+                frame_res = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), (new_w, new_h), interpolation=cv2.INTER_AREA)
+                
+                imgtk = ctk.CTkImage(light_image=Image.fromarray(frame_res), dark_image=Image.fromarray(frame_res), size=(new_w, new_h))
+                self.sc_video_label.configure(image=imgtk, text="")
+                self.sc_video_label.image = imgtk
+
+            if self.sc_is_playing:
+                self.sc_camera_after_id = self.after(15, camera_loop)
+
+        def start_game():
+            if hasattr(self, 'btn_sc_login') and self.btn_sc_login.winfo_exists():
+                self.btn_sc_login.destroy()
+                
+            import cv2
+            if not load_ai():
+                self.lbl_sc_detect.configure(text="Lỗi nạp Model AI!", text_color=COLORS["red"])
+                return
+            
+            self.sc_is_playing = True
+            self.sc_score = 0
+            self.sc_time_left = 60
+            
+            self.lbl_sc_score.configure(text="0")
+            self.lbl_sc_time.configure(text="00:60", text_color=COLORS["green"])
+            self.btn_sc_start.configure(state="disabled", text="ĐANG GIẢI MÃ...", fg_color=COLORS["stroke"])
+            
+            load_next_puzzle()
+            
+            if not self.sc_cap:
+                import os
+                self.sc_cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(0)
+                self.sc_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                self.sc_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+            timer_loop()
+            camera_loop()
+
+        self.btn_sc_start.configure(command=start_game)
     # ---------- Flashcard game ----------
     def show_flashcard_game(self):
         self.clear_content()
@@ -1306,18 +1789,32 @@ class MinigameFrame(ctk.CTkFrame):
         self.current_user = auth.CURRENT_USER if (auth and hasattr(auth, "CURRENT_USER")) else None
         self.current_user_id = self.current_user["id"] if self.current_user else None
         
-        # 2. Render lại UI Dashboard (Thuật toán sẽ tự xóa form Login và load DB thật)
+        # --- BÍ KÍP: CỘNG ĐIỂM BÙ NẾU CHƠI XONG MỚI ĐĂNG NHẬP ---
+        if hasattr(self, 'pending_save_score') and self.pending_save_score > 0 and self.current_user_id:
+            try:
+                db = self._get_db()
+                if db and hasattr(db, 'get_conn'):
+                    conn = db.get_conn()
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE TaiKhoan SET DiemSo = ISNULL(DiemSo, 0) + ? WHERE ID = ?", (self.pending_save_score, self.current_user_id))
+                    cursor.execute("UPDATE TaiKhoan SET TongSoLanTap = ISNULL(TongSoLanTap, 0) + 1 WHERE ID = ?", (self.current_user_id,))
+                    conn.commit()
+                    print(f"-> Đã cộng bù {self.pending_save_score} điểm vào DB!")
+                    self.pending_save_score = 0 # Đặt lại sau khi lưu
+            except Exception as e:
+                print("Lỗi lưu điểm bù sau đăng nhập:", e)
+        # --------------------------------------------------------
+        
+        # 2. Render lại UI Dashboard
         self.show_dashboard()
         
-        # 3. ĐỒNG BỘ GIAO DIỆN SIDEBAR CỦA UI_USER (Chuẩn xác như study_ui)
+        # 3. ĐỒNG BỘ GIAO DIỆN SIDEBAR CỦA UI_USER
         try:
             toplevel = self.winfo_toplevel()
-            # Tìm chính xác hàm refresh_sidebar_auth mà bạn đã khai báo trong ui_user.py
             if hasattr(toplevel, "refresh_sidebar_auth"):
                 toplevel.refresh_sidebar_auth()
                 print("-> Đã đồng bộ Sidebar App Tổng qua hàm: refresh_sidebar_auth")
             else:
-                # Dự phòng nếu mở file main_minigame.py chạy độc lập không có ui_user
                 print("Đang chạy độc lập, không có sidebar để cập nhật.")
         except Exception as e:
             print("Cảnh báo: Không thể đồng bộ Sidebar App tổng:", e)

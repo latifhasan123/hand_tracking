@@ -1,10 +1,10 @@
 """Demo data for VSL Translate Minigame UI."""
 
 GAME_MODES = [
-    {"key": "guess", "title": "Đoán chữ cái", "icon": "A?", "color": "blue", "desc": "Nhận diện ký hiệu\nchữ cái"},
+    {"key": "guess", "title": "Mưa ký hiệu", "icon": "     🌧️", "color": "blue", "desc": "Bắn chữ đang rơi\nbằng ký hiệu tay"},
     {"key": "word", "title": "Ghép từ", "icon": "✚", "color": "green", "desc": "Ghép các ký hiệu\nthành từ"},
     {"key": "react", "title": "Phản xạ nhanh", "icon": "⚡", "color": "yellow", "desc": "Trả lời nhanh,\nghi điểm cao"},
-    {"key": "quiz", "title": "Quiz", "icon": "?", "color": "purple", "desc": "Kiểm tra kiến thức\nký hiệu"},
+    {"key": "quiz", "title": "Giải Mã Két Sắt", "icon": "🔐", "color": "purple", "desc": "Giải đố và nhập mật mã\nbằng ngôn ngữ ký hiệu"},
     {"key": "flashcard", "title": "Flashcard", "icon": "▣", "color": "pink", "desc": "Ôn tập bằng\nthẻ ký hiệu"},
     {"key": "wheel", "title": "Vòng quay\nthử thách", "icon": "◉", "color": "teal", "desc": "Quay là chơi,\ntrúng thử thách"},
 ]

@@ -168,6 +168,13 @@ class StudyApp(ctk.CTkFrame):
         self.practice_after_id = None
         self.practice_video_label = None
         self.practice_status_label = None
+        self.lesson_cap = None
+        self.lesson_video_after_id = None
+        # CẤY 2 BỘ NÃO VÀO BỘ NHỚ LƯU TRỮ CỦA APP
+        self.lstm_model_1 = None
+        self.action_labels_1 = []
+        self.lstm_model_2 = None
+        self.action_labels_2 = []
 
         self.pack(fill="both", expand=True)
         if self.show_sidebar:
@@ -267,7 +274,8 @@ class StudyApp(ctk.CTkFrame):
     def _clear_page(self):
         # Khi chuyển sang trang khác, tự tắt camera luyện tập để tránh camera chạy ngầm.
         self.stop_practice_camera()
-
+        if hasattr(self, 'stop_lesson_video'):
+            self.stop_lesson_video()
         if self.page_frame is not None:
             self.page_frame.destroy()
         self.page_frame = ctk.CTkFrame(self, fg_color=T.BG, corner_radius=0)
@@ -278,10 +286,30 @@ class StudyApp(ctk.CTkFrame):
 
     def _content(self):
         root = self._clear_page()
-        wrapper = ctk.CTkScrollableFrame(root, fg_color=T.BG, corner_radius=0)
+        
+        # ==========================================
+        # BÍ KÍP 1: ĐỌC NGỮ CẢNH ĐỂ QUYẾT ĐỊNH BẬT/TẮT THANH CUỘN
+        # ==========================================
+        import inspect
+        try:
+            caller_name = inspect.stack()[1].function
+            # Chỉ Bảng chữ cái, Trang chủ, và Từ vựng mới có thanh cuộn (Scroll)
+            needs_scroll = caller_name in ["show_alphabet", "show_home", "show_conversation"]
+        except Exception:
+            needs_scroll = False
+            
+        if needs_scroll:
+            wrapper = ctk.CTkScrollableFrame(root, fg_color=T.BG, corner_radius=0)
+        else:
+            # Các trang tĩnh (Bài học, Ôn tập) sẽ không có thanh cuộn
+            wrapper = ctk.CTkFrame(root, fg_color=T.BG, corner_radius=0)
+            
         wrapper.grid(row=0, column=0, sticky="nsew", padx=(35, 30), pady=(20, 15))
         wrapper.grid_columnconfigure(0, weight=1)
-        wrapper.grid_rowconfigure(99, weight=1) 
+        
+        if not needs_scroll:
+            wrapper.grid_rowconfigure(99, weight=1) 
+            
         return wrapper
 
     def _title(self, parent, title: str, subtitle: str, row: int = 0):
@@ -362,34 +390,47 @@ class StudyApp(ctk.CTkFrame):
         sequence = []
 
         if topic_type == "conversation":
-            # Nếu là câu giao tiếp -> Duyệt trong LESSON_DETAILS và sắp xếp theo số 'order'
             lessons = []
-            for key, lesson in LESSON_DETAILS.items():
-                if not isinstance(lesson, dict) or lesson.get("topic_type") != "conversation":
-                    continue
-                value = self.get_current_lesson_key(lesson, key)
-                order = lesson.get("order") or lesson.get("ThuTu") or 9999
-                try:
-                    order = int(order)
-                except Exception:
-                    order = 9999
-                if value:
-                    lessons.append((order, value))
-
-            lessons.sort(key=lambda x: x[0])
-            for _, value in lessons:
-                if self.normalize_lesson_key(value) not in [self.normalize_lesson_key(x) for x in sequence]:
-                    sequence.append(value)
+            try:
+                for key, lesson in LESSON_DETAILS.items():
+                    if not isinstance(lesson, dict) or lesson.get("topic_type") != "conversation":
+                        continue
+                    value = self.get_current_lesson_key(lesson, key)
+                    order = lesson.get("order") or lesson.get("ThuTu") or 9999
+                    try: order = int(order)
+                    except: order = 9999
+                    if value: lessons.append((order, value))
+                lessons.sort(key=lambda x: x[0])
+                for _, value in lessons:
+                    if self.normalize_lesson_key(value) not in [self.normalize_lesson_key(x) for x in sequence]:
+                        sequence.append(value)
+            except Exception: pass
         else:
-            # Nếu là chữ cái -> Duyệt theo bảng ALPHABET gốc
-            for item in ALPHABET:
-                if isinstance(item, dict):
-                    value = item.get("label") or item.get("NhanHienThi") or item.get("title")
-                else:
-                    value = item
-                value = str(value or "").replace("Chữ ", "", 1).strip()
-                if value and self.normalize_lesson_key(value) not in [self.normalize_lesson_key(x) for x in sequence]:
-                    sequence.append(value)
+            # ==========================================
+            # BÍ KÍP 2: PHÂN LUỒNG RẠCH RÒI "DẤU CÂU" VÀ "CHỮ CÁI"
+            # ==========================================
+            current_key = str(self.get_current_lesson_key(current_lesson)).upper()
+            is_mark = current_key.startswith("DAU_") or "DẤU" in current_key
+
+            try:
+                for item in ALPHABET:
+                    value = item.get("label") or item.get("NhanHienThi") or item.get("title") if isinstance(item, dict) else item
+                    value_str = str(value or "").replace("Chữ ", "", 1).strip().upper()
+                    
+                    if not value_str: continue
+                    item_is_mark = value_str.startswith("DAU_") or "DẤU" in value_str
+                    
+                    # Nếu đang học Dấu thì chỉ load mảng Dấu, đang học Chữ thì load mảng Chữ
+                    if is_mark == item_is_mark:
+                        if self.normalize_lesson_key(value_str) not in [self.normalize_lesson_key(x) for x in sequence]:
+                            sequence.append(value_str)
+            except Exception: pass
+            
+            # Cứu cánh (Fallback): Lỡ trong ALPHABET không có sẵn mảng dấu câu
+            if is_mark and not sequence:
+                sequence = ["DAU_A", "DAU_MU", "DAU_MOC", "DAU_SAC", "DAU_HUYEN", "DAU_HOI", "DAU_NGA", "DAU_NANG"]
+                if current_key not in sequence:
+                    sequence.insert(0, current_key)
 
         return sequence
 
@@ -439,7 +480,46 @@ class StudyApp(ctk.CTkFrame):
         else:
             messagebox.showinfo("Góc học tập", "Bạn đã ở bài cuối cùng trong bảng chữ cái.")
 
+    def decompose_target_sign(self, char_str):
+        """
+        Phân tích 1 chữ cái thành: (Chữ_gốc, Mã_dấu_đi_kèm, Có_phải_chữ_kép_không)
+        Ví dụ: 'Â' -> ('A', 'DAU_MU', True)
+               'B' -> ('B', None, False)
+        """
+        import sys, os
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        if project_root not in sys.path:
+            sys.path.append(project_root)
+            
+        try:
+            from core.vietnamese_utils import VIETNAMESE_MAP
+        except Exception:
+            # Bọc lót an toàn nhỡ import lỗi
+            VIETNAMESE_MAP = {
+                "DAU_MU": {'A': 'Â', 'E': 'Ê', 'O': 'Ô'},
+                "DAU_MOC": {'O': 'Ơ', 'U': 'Ư'},
+                "DAU_A": {'A': 'Ă'}
+            }
 
+        val = str(char_str).replace("Chữ ", "").strip().upper()
+        for mark_code, char_dict in VIETNAMESE_MAP.items():
+            for base_c, result_c in char_dict.items():
+                if result_c.upper() == val:
+                    return (base_c, mark_code, True)
+        return (val, None, False)
+
+    def get_mark_display_name(self, mark_code):
+        names = {
+            "DAU_A": "Dấu Á",
+            "DAU_MU": "Dấu Mũ",
+            "DAU_MOC": "Dấu Móc",
+            "DAU_SAC": "Dấu Sắc",
+            "DAU_HUYEN": "Dấu Huyền",
+            "DAU_HOI": "Dấu Hỏi",
+            "DAU_NGA": "Dấu Ngã",
+            "DAU_NANG": "Dấu Nặng"
+        }
+        return names.get(str(mark_code), "Dấu câu")
     def _asset_project_root(self):
         """
         Trả về thư mục gốc project C:\\hand_tracking khi file đang nằm ở
@@ -546,20 +626,31 @@ class StudyApp(ctk.CTkFrame):
 
     def load_lesson_image(self, lesson: dict, size=(330, 280)):
         """
-        Load ảnh bàn tay bằng CTkImage. Nếu không có ảnh hoặc sai đường dẫn
-        thì trả về None để giao diện tự dùng icon cũ.
+        Load ảnh bàn tay bằng CTkImage CÓ CACHING để tăng tốc độ UI.
         """
+        # BÍ KÍP 2: Tạo bộ nhớ đệm (Cache) để không phải đọc lại ổ cứng nhiều lần
+        if not hasattr(self, 'image_cache'):
+            self.image_cache = {}
+            
         image_path = self.get_lesson_image_path(lesson)
         full_path = self.resolve_asset_path(image_path)
 
         if not full_path or not os.path.exists(full_path):
-            if image_path:
-                print("[Góc học tập] Không tìm thấy ảnh:", full_path)
             return None
 
+        # Kiểm tra xem ảnh này đã có trong RAM chưa?
+        cache_key = f"{full_path}_{size[0]}x{size[1]}"
+        if cache_key in self.image_cache:
+            return self.image_cache[cache_key]
+
         try:
+            from PIL import Image
             img = Image.open(full_path)
-            return ctk.CTkImage(light_image=img, dark_image=img, size=size)
+            ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=size)
+            
+            # Lưu vào Cache cho các lần load sau
+            self.image_cache[cache_key] = ctk_img
+            return ctk_img
         except Exception as e:
             print("[Góc học tập] Không load được ảnh:", full_path, e)
             return None
@@ -840,7 +931,18 @@ class StudyApp(ctk.CTkFrame):
         line = ctk.CTkFrame(bottom, height=1, fg_color=T.LINE)
         line.pack(fill="x", pady=(0, 12))
 
-        ctk.CTkButton(bottom, text="Học ngay  ❯", height=38, fg_color=T.BLUE, hover_color=T.BLUE_DARK, command=lambda: self.show_lesson(item.get("label", item["letter"].replace("Chữ ", "")))).pack(fill="x")
+        ctk.CTkButton(
+            bottom, 
+            text="Học ngay  ❯", 
+            height=38, 
+            fg_color=T.BLUE, 
+            hover_color=T.BLUE_DARK, 
+            command=lambda: self.show_lesson(
+                item.get("label", item["letter"].replace("Chữ ", "")),
+                custom_back_cmd=self.show_home,        # <--- Bơm địa chỉ Home vào
+                custom_back_text="←  Trang chính"      # <--- Đổi tên nút cho đẹp
+            )
+        ).pack(fill="x")
     def topic_card(self, parent, idx: int, item: dict):
         color = COLOR_MAP.get(item.get("color", "blue"), T.BLUE)
         
@@ -887,7 +989,11 @@ class StudyApp(ctk.CTkFrame):
         
         # BÍ KÍP 3: Gắn sự kiện click để nhảy vào thẳng bài học giống trang Giao tiếp
         def on_click(e):
-            self.show_lesson(item.get("first_label", "D"))
+            self.show_lesson(
+                item.get("first_label", "D"),
+                custom_back_cmd=self.show_home,        # <--- Bơm địa chỉ Home vào
+                custom_back_text="←  Trang chính"
+            )
             
         card.bind("<Button-1>", on_click)
         for child in [content, icon_box, text_box, bottom, stat_row]:
@@ -979,43 +1085,55 @@ class StudyApp(ctk.CTkFrame):
         card.pack(fill="x", pady=(0, 18))
         ctk.CTkLabel(card, text="↗  Tiến độ học tập", font=ctk.CTkFont(family=T.FONT, size=18, weight="bold"), text_color=T.TEXT).pack(anchor="w", padx=22, pady=(22, 12))
         
-        # ==========================================
-        # ĐỒNG BỘ DỮ LIỆU THẬT TỪ TÀI KHOẢN
-        # ==========================================
+        # ==========================================================
+        # BÍ KÍP VÀNG: KẾT NỐI DB THẬT & LỌC CHỮ CÁI THUẦN TÚY (CORE 29)
+        # ==========================================================
         import sys, os
         sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
         try:
-            import auth_ui
-            # Lấy số lượng bài đã đánh dấu "✓ Đã học"
+            import auth_ui, user_db
+            
+            # 1. LẤY DỮ LIỆU THẬT TỪ DATABASE CHỨ KHÔNG NHÌN VÀO RAM NỮA
             user_data = auth_ui.CURRENT_USER or {}
-            learned_count = len(auth_ui.LEARNED_LETTERS) if auth_ui.CURRENT_USER else 0
+            user_id = user_data.get("id")
             
-            # Lấy dữ liệu thật cho các thống kê, mặc định là 0
-            chuoi_ngay = user_data.get("ChuoiNgayHoc", 0)
-            do_chinh_xac = user_data.get("DoChinhXacTB", 0)
-            thoi_gian_phut = user_data.get("ThoiGianHoc", 0)
-        except Exception:
-            user_data = {}
-            learned_count = 0
-            chuoi_ngay = 0
-            do_chinh_xac = 0
-            thoi_gian_phut = 0
+            if user_id:
+                # Gọi thẳng xuống SQL Server bốc dữ liệu mới nhất
+                raw_learned_list = user_db.get_learned_letters(user_id)
+                # Lấy luôn 3 chỉ số "sống"
+                stats_row = user_db.get_user_minigame_stats(user_id) or {}
+                do_chinh_xac = stats_row.get("DoChinhXacTB", 0)
+                chuoi_ngay = stats_row.get("ChuoiNgayHoc", 0)
+                
+                # Truy vấn riêng ThoiGianHoc từ TaiKhoan
+                conn = user_db.get_conn()
+                cursor = conn.cursor()
+                cursor.execute("SELECT ISNULL(ThoiGianHoc, 0) FROM TaiKhoan WHERE ID = ?", (user_id,))
+                thoi_gian_phut = cursor.fetchone()[0]
+            else:
+                raw_learned_list = auth_ui.LEARNED_LETTERS or []
+                do_chinh_xac, chuoi_ngay, thoi_gian_phut = 0, 0, 0
+                
+            # 2. ÁP DỤNG BỘ LỌC DLC: Chỉ đếm những chữ cái thuộc Core 29
+            pure_learned = [char for char in raw_learned_list if self.is_pure_alphabet_letter(char)]
+            learned_count = len(pure_learned)
             
-        # Tính tổng số chữ cái có trong dữ liệu (mặc định là 29)
-        total_letters = len(ALPHABET) if ALPHABET else 29
-        # Tính phần trăm để vẽ vòng tròn
-        percent = learned_count / total_letters if total_letters > 0 else 0
-        
+        except Exception as e:
+            print("[Progress Panel] Lỗi móc nối DB:", e)
+            learned_count, do_chinh_xac, chuoi_ngay, thoi_gian_phut = 0, 0, 0, 0
+
+        # Khóa cứng mẫu số là 29 (Bảng chữ cái VSL chuẩn)
+        total_letters = 29
+        percent = min(1.0, learned_count / total_letters)
+
         # Xử lý hiển thị thời gian học (phút -> giờ phút)
         gio = thoi_gian_phut // 60
         phut = thoi_gian_phut % 60
         thoi_gian_str = f"{gio}h {phut}m" if gio > 0 else f"{phut}m"
-        # ==========================================
 
         center = ctk.CTkFrame(card, fg_color="transparent")
         center.pack(fill="x", padx=20)
         
-        # GIỮ NGUYÊN VÒNG TRÒN TIẾN ĐỘ NHƯ CŨ, KHÔNG ĐỤNG ĐẾN
         ring = ProgressRing(center, percent, size=120, color=T.BLUE, bg=T.PANEL)
         ring.pack(side="left", padx=(0, 14), pady=5)
         
@@ -1023,16 +1141,16 @@ class StudyApp(ctk.CTkFrame):
         info.pack(side="left", fill="both", expand=True)
         ctk.CTkLabel(info, text="Đã học:", font=ctk.CTkFont(size=14), text_color=T.MUTED).pack(anchor="w", pady=(16, 0))
         
-        # Cập nhật phân số bài học thật
+        # Hiển thị đúng: Ví dụ 15/29
         ctk.CTkLabel(info, text=f"{learned_count}/{total_letters}", font=ctk.CTkFont(size=26, weight="bold"), text_color=T.GREEN).pack(anchor="w")
         
         ctk.CTkLabel(info, text="Bảng chữ cái", font=ctk.CTkFont(size=13), text_color=T.MUTED).pack(anchor="w")
         ctk.CTkFrame(card, height=1, fg_color=T.LINE).pack(fill="x", padx=20, pady=15)
         
-        # NẠP DỮ LIỆU THẬT VÀO 3 DÒNG THỐNG KÊ BÊN DƯỚI, GIỮ NGUYÊN HOÀN TOÀN MÀU SẮC GIAO DIỆN CỦA BẠN
+        # IN 3 CHỈ SỐ "SỐNG" RA GIAO DIỆN VỚI CÂU CHÚ THÍCH THÔNG MINH
         self.stat_row(card, "📅", "Chuỗi ngày học", f"{chuoi_ngay} ngày", T.GREEN, "Cố gắng duy trì mỗi ngày!" if chuoi_ngay > 0 else "Hãy bắt đầu bài học!")
         self.stat_row(card, "🎯", "Độ chính xác TB", f"{do_chinh_xac}%", T.GREEN, "Làm rất tốt! 💪" if do_chinh_xac > 0 else "Chưa có dữ liệu")
-        self.stat_row(card, "🕘", "Thời gian học", thoi_gian_str, T.BLUE, "Tổng thời gian học tập")
+        self.stat_row(card, "🕘", "Thời gian học", thoi_gian_str, T.BLUE, "Tổng thời gian thực hành")
 
     def motivation_panel(self, parent):
         card = ctk.CTkFrame(parent, fg_color=T.PANEL, border_width=1, border_color=T.BORDER, corner_radius=16)
@@ -1119,7 +1237,22 @@ class StudyApp(ctk.CTkFrame):
                 ctk.CTkLabel(current_detail_panel, text="👈", font=ctk.CTkFont(size=70), text_color=T.BLUE).pack(pady=(180, 20))
                 ctk.CTkLabel(current_detail_panel, text="Hãy chọn một mục\nđể bắt đầu bài học", font=ctk.CTkFont(size=18, weight="bold"), text_color=T.MUTED, justify="center").pack()
             else:
-                current_detail_panel = self.letter_detail(right_container, letter)
+                def on_tile_state_flipped(marked_letter):
+                    if marked_letter in tile_cards:
+                        target_card = tile_cards[marked_letter]
+                        
+                        # 1. Đổi dòng chữ nhỏ thành "✓ Đã học" màu xanh
+                        target_card.status_label.configure(text="✓ Đã học", text_color=T.GREEN)
+                        
+                        # 2. Bonus UX: Đổi luôn viền của cái thẻ đó sang màu Xanh lá cho rực rỡ!
+                        target_card.configure(border_color=T.GREEN)
+
+                # Bơm tổng đài vào Bảng chi tiết
+                current_detail_panel = self.letter_detail(
+                    right_container, 
+                    letter,
+                    on_marked_learned=on_tile_state_flipped  # <--- Cắm dây kết nối
+                )
                 
             current_detail_panel.pack(fill="both", expand=True)
 
@@ -1140,16 +1273,10 @@ class StudyApp(ctk.CTkFrame):
                 widget.destroy()
             tile_cards.clear() 
             
-            # ==========================================
-            # 2. XỬ LÝ DỮ LIỆU TỰ ĐỘNG CHIA TAB
-            # ==========================================
-            # Hệ thống tự mớm sẵn dấu câu nếu SQL của bạn chưa có
-            # Dùng ID hệ thống thay vì chữ tiếng Việt
             default_marks = [
                 "DAU_A", "DAU_MU", "DAU_MOC", 
                 "DAU_SAC", "DAU_HUYEN", "DAU_HOI", "DAU_NGA", "DAU_NANG"
             ]
-            # Chuẩn 29 chữ cái Tiếng Việt
             default_alpha = ["A", "Ă", "Â", "B", "C", "D", "Đ", "E", "Ê", "G", "H", "I", "K", "L", "M", "N", "O", "Ô", "Ơ", "P", "Q", "R", "S", "T", "U", "Ư", "V", "X", "Y"]
             
             alpha_list = []
@@ -1158,28 +1285,45 @@ class StudyApp(ctk.CTkFrame):
             if ALPHABET:
                 for item in ALPHABET:
                     val = str(item).upper()
-                    # Lấy MỌI chữ cái đơn lẻ (Bao gồm cả Ă, Â, Ê...)
                     if len(val) == 1:
                         alpha_list.append(item)
                         
-            # Nếu SQL lỗi không nạp được ALPHABET, dùng danh sách mặc định
             if not alpha_list:
                 alpha_list = default_alpha
                 
             current_data = alpha_list if self.current_alpha_tab == "Chữ cái" else marks_list
+            
+            # ==========================================
+            # SIÊU TỪ ĐIỂN TÌM KIẾM (SEARCH INDEX)
+            # ==========================================
+            mark_search_index = {
+                "DAU_A": "DẤU Á (Ă) DAU A",
+                "DAU_MU": "DẤU MŨ (Â, Ê, Ô) DAU MU",
+                "DAU_MOC": "DẤU MÓC (Ư, Ơ) DAU MOC",
+                "DAU_SAC": "DẤU SẮC DAU SAC",
+                "DAU_HUYEN": "DẤU HUYỀN DAU HUYEN",
+                "DAU_HOI": "DẤU HỎI DAU HOI",
+                "DAU_NGA": "DẤU NGÃ DAU NGA",
+                "DAU_NANG": "DẤU NẶNG DAU NANG"
+            }
                 
-            filtered = [char for char in current_data if query in str(char).upper()]
+            filtered = []
+            for char in current_data:
+                # Trỏ sang siêu từ điển, nếu không có thì lấy str gốc
+                target_str = mark_search_index.get(str(char), str(char)).upper()
+                if query in target_str or query in str(char).upper():
+                    filtered.append(char)
+
             if not filtered:
                 ctk.CTkLabel(grid, text="Không tìm thấy kết quả nào.", text_color=T.MUTED, font=ctk.CTkFont(size=15)).grid(row=0, column=0, columnspan=6, pady=20)
                 
             for idx, letter in enumerate(filtered):
-                # Tab Chữ cái 6 cột, Tab Dấu câu chỉ 4 cột (Vì thẻ dấu câu bự hơn)
                 cols_per_row = 6 if self.current_alpha_tab == "Chữ cái" else 4
                 r, c = divmod(idx, cols_per_row)
                 
                 is_selected = (letter == current_letter)
                 card = self.letter_tile(grid, r, c, letter, selected=is_selected, on_click=on_tile_click)
-                tile_cards[letter] = card 
+                tile_cards[letter] = card
 
         search.bind("<KeyRelease>", filter_alphabet)
         
@@ -1218,7 +1362,10 @@ class StudyApp(ctk.CTkFrame):
         
         status = "✓ Đã học" if learned else "● Chưa học"
         color = T.GREEN if learned else T.MUTED_2
-        ctk.CTkLabel(card, text=status, font=ctk.CTkFont(size=11), text_color=color).pack(pady=(0, 5))
+        status_lbl = ctk.CTkLabel(card, text=status, font=ctk.CTkFont(size=11), text_color=color)
+        status_lbl.pack(pady=(0, 5))
+        
+        card.status_label = status_lbl
         
         def click_handler(_e, l=letter):
             if on_click: on_click(l)
@@ -1229,7 +1376,7 @@ class StudyApp(ctk.CTkFrame):
             
         return card  
 
-    def letter_detail(self, parent, letter):
+    def letter_detail(self, parent, letter, on_marked_learned=None):
         lesson = self.get_lesson(letter)
         icon = lesson.get("icon", "☝")
         desc = lesson.get("desc", "Dựng ngón trỏ thẳng đứng.")
@@ -1238,41 +1385,49 @@ class StudyApp(ctk.CTkFrame):
         card.grid_propagate(False)
         ctk.CTkLabel(card, text=self.lesson_title_text(lesson), font=ctk.CTkFont(size=27, weight="bold"), text_color=T.TEXT).pack(anchor="w", padx=20, pady=(22, 8))
         
-        # ==========================================
-        # BÍ KÍP TÁCH 2 ẢNH CHO CÁC CHỮ CÓ DẤU
-        # ==========================================
+        # ĐÃ XÓA UNICODE - DÙNG LOGIC NGUYÊN THỦY
+        val = str(letter).upper().replace("CHỮ ", "").strip()
+        
         composite_map = {
             "Ă": "DAU_A", "Â": "DAU_MU", "Ê": "DAU_MU",
             "Ô": "DAU_MU", "Ơ": "DAU_MOC", "Ư": "DAU_MOC"
         }
-        
-        val = str(letter).upper().replace("CHỮ ", "").strip()
+        # Bản đồ lấy ảnh chữ gốc chuẩn xác
+        base_letter_map = {
+            "Ă": "A", "Â": "A", "Ê": "E",
+            "Ô": "O", "Ơ": "O", "Ư": "U"
+        }
         
         if val in composite_map:
-            # Nếu là chữ có dấu -> Tạo khung ngang chứa 2 ảnh
+            # TẠO KHUNG NGANG CHỨA 2 ẢNH
             img_frame = ctk.CTkFrame(card, fg_color="transparent")
             img_frame.pack(fill="x", padx=20, pady=5)
             img_frame.grid_columnconfigure((0, 1), weight=1)
             
-            # 1. Ảnh chữ cái gốc
-            base_img = self.create_lesson_image_label(img_frame, lesson, size=(100, 100), height=140, fallback_font_size=60)
+            base_char = base_letter_map[val]
+            base_lesson = self.get_lesson(base_char)
+            base_img = self.create_lesson_image_label(img_frame, base_lesson, size=(100, 100), height=140, fallback_font_size=60)
             base_img.configure(fg_color="#0E1722", corner_radius=14)
             base_img.grid(row=0, column=0, padx=(0, 5), sticky="ew")
             ctk.CTkLabel(img_frame, text="Ký hiệu gốc", font=ctk.CTkFont(size=12, weight="bold"), text_color=T.MUTED).grid(row=1, column=0, pady=(5,0))
             
-            # 2. Ảnh dấu đi kèm
-            mark_lesson = {"label": composite_map[val]} # Đánh lừa hệ thống để lấy ảnh dấu
+            mark_char = composite_map[val]
+            mark_lesson = {"label": mark_char} 
             mark_img = self.create_lesson_image_label(img_frame, mark_lesson, size=(100, 100), height=140, fallback_font_size=60)
             mark_img.configure(fg_color="#0E1722", corner_radius=14)
             mark_img.grid(row=0, column=1, padx=(5, 0), sticky="ew")
             ctk.CTkLabel(img_frame, text="Thêm dấu", font=ctk.CTkFont(size=12, weight="bold"), text_color=T.MUTED).grid(row=1, column=1, pady=(5,0))
         else:
-            # Chữ bình thường thì hiện 1 ảnh to như cũ
+            # ẢNH BÌNH THƯỜNG
+            media_border = ctk.CTkFrame(card, fg_color="#0B1520", border_width=2, border_color=T.BORDER, corner_radius=16)
+            media_border.pack(fill="x", padx=20, pady=5)
+            
             detail_image = self.create_lesson_image_label(
-                card, lesson, size=(235, 165), height=180, fallback_font_size=82
+                media_border, lesson, size=(235, 165), height=180, fallback_font_size=82
             )
-            detail_image.configure(fg_color="#0E1722", corner_radius=14)
-            detail_image.pack(fill="x", padx=20, pady=5)
+            detail_image.configure(fg_color="transparent", corner_radius=14)
+            detail_image.pack(fill="both", expand=True, padx=2, pady=2)
+            
         ctk.CTkLabel(card, text="Cách thực hiện", font=ctk.CTkFont(size=17, weight="bold"), text_color=T.BLUE).pack(anchor="w", padx=20, pady=(15, 4))
         for i, step_text in enumerate(steps, 1):
             ctk.CTkLabel(
@@ -1284,13 +1439,16 @@ class StudyApp(ctk.CTkFrame):
                 anchor="w",
                 wraplength=250
             ).pack(anchor="w", fill="x", padx=22, pady=2)
+            
         ctk.CTkLabel(card, text="💡 Mẹo nhỏ", font=ctk.CTkFont(size=15, weight="bold"), text_color=T.YELLOW).pack(anchor="w", padx=20, pady=(18, 2))
         ctk.CTkLabel(card, text=desc, wraplength=250, justify="left", font=ctk.CTkFont(size=13), text_color=T.MUTED).pack(anchor="w", padx=20)
+        
         # Nút chuyển sang màn hình chi tiết bài học (Ảnh thứ 2)
         ctk.CTkButton(card, text="📖  Xem chi tiết bài học", height=44, fg_color=T.BLUE, hover_color=T.BLUE_DARK, command=lambda: self.show_lesson(lesson.get("label", letter))).pack(fill="x", padx=20, pady=(20, 10))
         
         # Nút phụ
         ctk.CTkButton(card, text="📷  Luyện bằng camera", height=40, fg_color="transparent", border_width=1, border_color=T.BORDER, text_color=T.TEXT, hover_color=T.CARD_HOVER, command=lambda: self.show_camera_practice(lesson.get("label", letter))).pack(fill="x", padx=20, pady=(0, 20))
+        
         import sys, os
         sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
         import auth_ui, user_db
@@ -1302,8 +1460,15 @@ class StudyApp(ctk.CTkFrame):
                 return
                 
             if user_db.mark_as_learned(auth_ui.CURRENT_USER["id"], letter):
-                auth_ui.LEARNED_LETTERS.append(letter)
+                if letter not in auth_ui.LEARNED_LETTERS:
+                    auth_ui.LEARNED_LETTERS.append(letter)
                 btn_done.configure(text="✓ Đã lưu tiến độ", text_color=T.GREEN, state="disabled")
+                
+                # ==========================================================
+                # BẮN TÍN HIỆU LÀM XANH THẺ GRID (KHÔNG CẦN RESET)
+                # ==========================================================
+                if on_marked_learned:
+                    on_marked_learned(letter)
             else:
                 messagebox.showerror("Lỗi DB", "Không thể lưu tiến độ!")
 
@@ -1314,8 +1479,84 @@ class StudyApp(ctk.CTkFrame):
             btn_done.configure(text="✓ Đã lưu tiến độ", text_color=T.GREEN, state="disabled")
 
         return card
+    # ==========================================
+    # CỖ MÁY VIDEO PLAYER (MP4) CHO BÀI HỌC
+    # ==========================================
+    # ==========================================
+    # CỖ MÁY VIDEO PLAYER (MP4) CHO BÀI HỌC
+    # ==========================================
+    def get_lesson_video_path(self, lesson_key):
+        """Truy tìm đường dẫn file .mp4: TỐI ƯU TỐC ĐỘ (Đã gỡ bỏ Unicode)"""
+        import os
+        
+        val = str(lesson_key).strip().upper()
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        folder_path = os.path.join(base_dir, "user", "assets", "signs", "NNKH")
+        
+        if not os.path.exists(folder_path):
+            folder_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'signs', 'NNKH')
+            
+        if os.path.exists(folder_path):
+            direct_file = os.path.join(folder_path, f"{val}.mp4")
+            if os.path.exists(direct_file):
+                return direct_file
+                
+            for file in os.listdir(folder_path):
+                if file.upper() == f"{val}.MP4":
+                    return os.path.join(folder_path, file)
+        return None
 
-    def show_lesson(self, letter="D"):
+    def stop_lesson_video(self):
+        """Dọn dẹp luồng phát video một cách an toàn"""
+        if self.lesson_video_after_id is not None:
+            try: self.after_cancel(self.lesson_video_after_id)
+            except Exception: pass
+            self.lesson_video_after_id = None
+            
+        if self.lesson_cap is not None:
+            try: self.lesson_cap.release()
+            except Exception: pass
+            self.lesson_cap = None
+
+    def play_lesson_video(self, video_label, video_path, target_w=430, target_h=310):
+        """Phát video MP4 và tự động lặp lại (Loop)"""
+        import cv2
+        from PIL import Image
+        import customtkinter as ctk
+        
+        self.stop_lesson_video() 
+        self.lesson_cap = cv2.VideoCapture(video_path)
+        
+        def update_frame():
+            if not self.lesson_cap or not self.lesson_cap.isOpened():
+                return
+                
+            success, frame = self.lesson_cap.read()
+            if not success:
+                self.lesson_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                success, frame = self.lesson_cap.read()
+                
+            if success:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w = frame_rgb.shape[:2]
+                
+                # Render video đúng kích thước tùy chỉnh được truyền vào
+                scale = min(target_w / w, target_h / h)
+                new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+                
+                frame_resized = cv2.resize(frame_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                img = Image.fromarray(frame_resized)
+                imgtk = ctk.CTkImage(light_image=img, dark_image=img, size=(new_w, new_h))
+                
+                video_label.configure(image=imgtk, text="")
+                video_label.image = imgtk
+                
+            self.lesson_video_after_id = self.after(33, update_frame)
+            
+        update_frame()
+
+    # TÌM TRONG HÀM show_lesson() ĐỂ CHÉP ĐÈ ĐOẠN KHUNG ẢNH:
+    def show_lesson(self, letter="D", custom_back_cmd=None, custom_back_text=None):
         lesson = self.get_lesson(letter)
         lesson_title = self.lesson_title_text(lesson)
         topic_type = lesson.get("topic_type", "alphabet")
@@ -1329,8 +1570,12 @@ class StudyApp(ctk.CTkFrame):
         self._title(page, f"{title_prefix}{lesson_title.upper()}", "Học cách thực hiện ký hiệu đúng")
         
         # BÍ KÍP 4: Nút Back tự nhận diện nơi để về
-        back_cmd = self.show_alphabet if topic_type == "alphabet" else self.show_conversation
-        back_text = "←  Bảng chữ cái" if topic_type == "alphabet" else "←  Từ vựng & Giao tiếp"
+        if custom_back_cmd:
+            back_cmd = custom_back_cmd
+            back_text = custom_back_text or "←  Trở về"
+        else:
+            back_cmd = self.show_alphabet if topic_type == "alphabet" else self.show_conversation
+            back_text = "←  Bảng chữ cái" if topic_type == "alphabet" else "←  Từ vựng & Giao tiếp"
         
         self.back_button(page, command=back_cmd, text=back_text).grid(
             row=0, column=1, rowspan=2, sticky="ne", padx=(15, 0), pady=(5, 0)
@@ -1344,15 +1589,60 @@ class StudyApp(ctk.CTkFrame):
         desc = lesson.get("desc", "Giữ tay ổn định trước camera.")
         steps = lesson.get("steps") or ["Thực hiện ký hiệu theo mẫu.", "Giữ tay ổn định trước camera."]
         ctk.CTkLabel(main, text="⚙  Minh họa ký hiệu", font=ctk.CTkFont(size=20, weight="bold"), text_color=T.TEXT).grid(row=0, column=0, sticky="w", padx=30, pady=(28, 10))
-        demo = self.create_lesson_image_label(
-            main,
-            lesson,
-            size=(430, 310),
-            height=330,
-            fallback_font_size=125
-        )
-        demo.grid(row=1, column=0, sticky="nsew", padx=30, pady=(0, 30))
-
+        
+        media_border = ctk.CTkFrame(main, fg_color="#0B1520", border_width=2, border_color=T.BORDER, corner_radius=18)
+        media_border.grid(row=1, column=0, sticky="nsew", padx=30, pady=(0, 30))
+        media_border.grid_rowconfigure(0, weight=1)
+        
+        target_key = lesson.get("label", letter)
+        video_path = self.get_lesson_video_path(target_key)
+        
+        val = str(letter).upper().replace("CHỮ ", "").strip()
+        composite_map = {
+            "Ă": "DAU_A", "Â": "DAU_MU", "Ê": "DAU_MU",
+            "Ô": "DAU_MU", "Ơ": "DAU_MOC", "Ư": "DAU_MOC"
+        }
+        base_letter_map = {
+            "Ă": "A", "Â": "A", "Ê": "E",
+            "Ô": "O", "Ơ": "O", "Ư": "U"
+        }
+        
+        if video_path:
+            # ƯU TIÊN PHÁT VIDEO NẾU CÓ
+            media_border.grid_columnconfigure(0, weight=1)
+            demo = ctk.CTkLabel(media_border, text="Đang tải video...", font=ctk.CTkFont(size=16), text_color=T.MUTED)
+            demo.grid(row=0, column=0, sticky="nsew", padx=2, pady=2) 
+            self.play_lesson_video(demo, video_path)
+        elif val in composite_map:
+            # BÍ KÍP MỚI: TÁCH 2 ẢNH NGAY TRONG TRANG BÀI HỌC
+            media_border.grid_columnconfigure((0, 1), weight=1)
+            
+            # Ảnh chữ cái gốc
+            base_char = base_letter_map[val]
+            base_lesson = self.get_lesson(base_char)
+            base_img = self.create_lesson_image_label(media_border, base_lesson, size=(180, 180), height=330, fallback_font_size=100)
+            base_img.configure(fg_color="transparent", corner_radius=16)
+            base_img.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+            
+            # Ảnh dấu câu
+            mark_char = composite_map[val]
+            mark_lesson = self.get_lesson(mark_char)
+            mark_img = self.create_lesson_image_label(media_border, mark_lesson, size=(180, 180), height=330, fallback_font_size=100)
+            mark_img.configure(fg_color="transparent", corner_radius=16)
+            mark_img.grid(row=0, column=1, sticky="nsew", padx=2, pady=2)
+        else:
+            # HIỆN 1 ẢNH NHƯ BÌNH THƯỜNG
+            media_border.grid_columnconfigure(0, weight=1)
+            demo = self.create_lesson_image_label(
+                media_border,
+                lesson,
+                size=(430, 310),
+                height=330,
+                fallback_font_size=125
+            )
+            demo.configure(fg_color="transparent", corner_radius=16)
+            demo.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+        
         guide = ctk.CTkFrame(main, fg_color="transparent")
         guide.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(0, 30), pady=28)
         guide.grid_columnconfigure(0, weight=1)
@@ -1363,8 +1653,6 @@ class StudyApp(ctk.CTkFrame):
             text_color=T.TEXT
         ).pack(anchor="w", pady=(0, 15))
 
-        # Các bước hướng dẫn: không khóa chiều cao, cho phép tự xuống dòng.
-        # Nếu nội dung dài, text sẽ wrap theo đúng chiều rộng của khung, không bị cắt chữ.
         for i, s in enumerate(steps, 1):
             row = ctk.CTkFrame(
                 guide,
@@ -1400,7 +1688,6 @@ class StudyApp(ctk.CTkFrame):
             step_label.grid(row=0, column=1, sticky="ew", padx=(0, 14), pady=12)
 
             def _update_step_wrap(event, label=step_label):
-                # Trừ phần số thứ tự + padding. Tối thiểu 120px để màn hình nhỏ vẫn không tràn.
                 label.configure(wraplength=max(120, event.width - 86))
 
             row.bind("<Configure>", _update_step_wrap)
@@ -1422,7 +1709,10 @@ class StudyApp(ctk.CTkFrame):
             text="▶  Bắt đầu luyện tập",
             height=55,
             fg_color=T.BLUE,
-            command=lambda key=current_key: self.show_camera_practice(key)
+            command=lambda k=current_key, bc=back_cmd, bt=back_text: self.show_camera_practice(
+                k, 
+                back_cmd=lambda: self.show_lesson(k, custom_back_cmd=bc, custom_back_text=bt)
+            )
         ).grid(row=0, column=0, sticky="ew", padx=(0, 12))
 
         ctk.CTkButton(
@@ -1456,9 +1746,6 @@ class StudyApp(ctk.CTkFrame):
         self.info_item(info, "📊", "Mức độ", lesson.get("difficulty", "Dễ"), T.GREEN)
         self.info_item(info, "🕘", "Thời gian", lesson.get("duration", "2 phút"), T.BLUE)
         
-        # ==========================================
-        # BÍ KÍP: TỰ ĐỘNG THAY ĐỔI NHÃN VÀ CẬP NHẬT SỐ LIỆU THẬT
-        # ==========================================
         import sys, os
         sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
         try:
@@ -1467,15 +1754,11 @@ class StudyApp(ctk.CTkFrame):
         except Exception:
             learned = []
 
-        # Lấy danh sách tổng số bài của mục hiện tại (29 chữ cái hoặc 14 câu giao tiếp)
         sequence = self.get_lesson_sequence(lesson)
         total_items = len(sequence) if sequence else 1
-        
-        # Đếm xem người dùng đã học bao nhiêu bài trong nhóm này
         done_items = len([k for k in sequence if k in learned])
         percent = done_items / total_items
         
-        # Tự động thay đổi tên Nhãn theo ngữ cảnh (Bảng chữ cái vs Giao tiếp)
         progress_label = "Mẫu câu hoàn thành" if topic_type == "conversation" else "Tiến độ bảng chữ cái"
         
         self.info_item(info, "🏆", progress_label, f"{done_items} / {total_items}", T.PURPLE)
@@ -1485,7 +1768,27 @@ class StudyApp(ctk.CTkFrame):
         pb.set(percent)
         
         ctk.CTkLabel(info, text=f"{int(percent * 100)}% hoàn thành", text_color=T.MUTED).pack(anchor="w", padx=20)
-
+    def is_pure_alphabet_letter(self, letter_code):
+        """
+        Bộ lọc chuẩn 29 chữ cái Tiếng Việt.
+        Chỉ vứt bỏ các DẤU CÂU độc lập (DAU_MU, DAU_SAC, Dấu Á...).
+        Các chữ cái Tiếng Việt (Ă, Â, Ê, Ô, Ơ, Ư) được phục hồi nhân phẩm.
+        """
+        code_str = str(letter_code).replace("Chữ ", "").strip().upper()
+        
+        # 1. Nếu là các mã Dấu câu backend hoặc chứa chữ "DẤU" -> Vứt!
+        if code_str.startswith("DAU_") or "DẤU" in code_str:
+            return False
+            
+        # 2. Danh sách định danh chính xác 100% của 29 chữ cái Tiếng Việt chuẩn
+        # (Bao gồm cả 'DD' là định danh của chữ 'Đ' trong một số Database)
+        bang_chu_cai_chuom_29 = [
+            "A", "Ă", "Â", "B", "C", "D", "Đ", "DD", "E", "Ê", 
+            "G", "H", "I", "K", "L", "M", "N", "O", "Ô", "Ơ", 
+            "P", "Q", "R", "S", "T", "U", "Ư", "V", "X", "Y"
+        ]
+        
+        return code_str in bang_chu_cai_chuom_29
     def info_item(self, parent, icon, label, value, color):
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", padx=20, pady=12)
@@ -1547,20 +1850,14 @@ class StudyApp(ctk.CTkFrame):
         
         header = ctk.CTkFrame(wrapper, fg_color="transparent")
         header.pack(fill="x", pady=(0, 20))
-        
         title_box = ctk.CTkFrame(header, fg_color="transparent")
         title_box.pack(side="left")
         
-        # ==========================================
-        # BÍ KÍP 1: TÁCH BIỆT TIÊU ĐỀ THÔNG MINH THEO CHẾ ĐỘ
-        # ==========================================
         if practice_mode == "weak_signs":
             self._title(title_box, "KÝ HIỆU CẦN CHÚ Ý", f"Thực hành {len(self.practice_targets)} ký hiệu bạn làm sai nhiều nhất")
         elif pair_list:
-            if len(pair_list) > 2:
-                self._title(title_box, "ÔN TẬP TỪ VỰNG", f"Thực hành liên hoàn {len(pair_list)} ký hiệu bạn đã học")
-            else:
-                self._title(title_box, "LUYỆN TẬP PHÂN BIỆT", f"Thực hành liên hoàn cặp ký hiệu: {pair_list[0]} ↔ {pair_list[1]}")
+            if len(pair_list) > 2: self._title(title_box, "ÔN TẬP TỪ VỰNG", f"Thực hành liên hoàn {len(pair_list)} ký hiệu bạn đã học")
+            else: self._title(title_box, "LUYỆN TẬP PHÂN BIỆT", f"Thực hành liên hoàn cặp ký hiệu: {pair_list[0]} ↔ {pair_list[1]}")
         else:
             self._title(title_box, "LUYỆN TẬP BẰNG CAMERA", f"Thực hành nhận diện ký hiệu: {initial_letter}")
         
@@ -1577,49 +1874,61 @@ class StudyApp(ctk.CTkFrame):
 
         def go_back():
             safe_stop()
-            if back_cmd:
-                back_cmd()
-            elif pair_list:
-                self.show_confused_letters()
-            else:
-                self.show_lesson(initial_letter)
+            if back_cmd: back_cmd()
+            elif pair_list: self.show_confused_letters()
+            else: self.show_lesson(initial_letter)
 
         self.back_button(header, command=go_back, text="←  Trở về").pack(side="right", anchor="n", pady=5)
 
-        # --- BODY ---
         body = ctk.CTkFrame(wrapper, fg_color="transparent")
         body.pack(fill="both", expand=True)
         
-        # CỘT PHẢI
         right_frame = ctk.CTkFrame(body, fg_color="transparent", width=430)
         right_frame.pack(side="right", fill="y", padx=(25, 0))
         right_frame.pack_propagate(False) 
         
         target_panel = ctk.CTkFrame(right_frame, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
         target_panel.pack(fill="x", pady=(0, 15))
-        target_panel.grid_columnconfigure((0, 1), weight=1)
 
         box_req = ctk.CTkFrame(target_panel, fg_color="transparent")
-        box_req.grid(row=0, column=0, sticky="nsew", padx=10, pady=20)
-        ctk.CTkLabel(box_req, text="Ký hiệu cần làm", font=ctk.CTkFont(size=14), text_color=T.MUTED).pack(pady=(0, 8))
+        box_req.pack(fill="x", padx=10, pady=(15, 5))
         
-        self.target_name_label = ctk.CTkLabel(box_req, text=f"Chữ {get_current_target()}", font=ctk.CTkFont(size=24, weight="bold"), text_color=T.BLUE)
-        self.target_name_label.pack(pady=(0, 10))
+        header_req = ctk.CTkFrame(box_req, fg_color="transparent")
+        header_req.pack(fill="x", padx=10)
+        ctk.CTkLabel(header_req, text="Ký hiệu cần làm:", font=ctk.CTkFont(size=14), text_color=T.MUTED).pack(side="left")
+        self.target_name_label = ctk.CTkLabel(header_req, text=f"{get_current_target()}", font=ctk.CTkFont(size=18, weight="bold"), text_color=T.BLUE)
+        self.target_name_label.pack(side="right")
 
-        # ==========================================
-        # BÍ KÍP 2: ĐÃ XÓA SẠCH DÒNG CODE HIỂN THỊ ẢNH BỊ LẶP (DUPLICATE)
-        # ==========================================
-        img_label = self.create_lesson_image_label(box_req, lesson, size=(90, 90), height=90, fallback_font_size=60)
-        img_label.configure(fg_color="transparent")
-        img_label.pack()
-
-        ctk.CTkFrame(target_panel, width=1, fg_color=T.BORDER).grid(row=0, column=0, sticky="e", pady=20)
-
+        media_border = ctk.CTkFrame(box_req, fg_color="#0B1520", border_width=2, border_color=T.BORDER, corner_radius=14)
+        media_border.pack(pady=(10, 5))
+        self.practice_req_media = ctk.CTkLabel(media_border, text="", fg_color="transparent")
+        self.practice_req_media.pack(padx=2, pady=2)
+        ctk.CTkFrame(target_panel, height=1, fg_color=T.BORDER).pack(fill="x", padx=20, pady=5)
+        
         box_actual = ctk.CTkFrame(target_panel, fg_color="transparent")
-        box_actual.grid(row=0, column=1, sticky="nsew", padx=10, pady=20)
-        ctk.CTkLabel(box_actual, text="Bạn đang làm", font=ctk.CTkFont(size=14), text_color=T.MUTED).pack(pady=(0, 20))
-        current_sign_label = ctk.CTkLabel(box_actual, text="--", font=ctk.CTkFont(size=50, weight="bold"), text_color=T.TEXT)
-        current_sign_label.pack()
+        box_actual.pack(fill="x", padx=20, pady=(5, 15))
+        ctk.CTkLabel(box_actual, text="Bạn đang làm:", font=ctk.CTkFont(size=15), text_color=T.MUTED).pack(side="left")
+        current_sign_label = ctk.CTkLabel(box_actual, text="--", font=ctk.CTkFont(size=32, weight="bold"), text_color=T.TEXT)
+        current_sign_label.pack(side="right")
+
+        def load_practice_media(target_letter):
+            target_lesson = self.get_lesson(target_letter)
+            target_key = target_lesson.get("label", target_letter)
+            video_path = self.get_lesson_video_path(target_key)
+            
+            if video_path:
+                # VỊ TRÍ 1: Thay image="" thành image=None
+                self.practice_req_media.configure(text="Đang tải video...", image=None)
+                self.play_lesson_video(self.practice_req_media, video_path, target_w=280, target_h=180)
+            else:
+                self.stop_lesson_video()
+                img = self.load_lesson_image(target_lesson, size=(280, 180))
+                if img:
+                    self.practice_req_media.configure(image=img, text="")
+                    self.practice_req_media.image = img
+                else:
+                    # VỊ TRÍ 2: Thay image="" thành image=None
+                    self.practice_req_media.configure(image=None, text=target_lesson.get("icon", "☝"), font=ctk.CTkFont(size=60))
 
         stats_panel = ctk.CTkFrame(right_frame, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
         stats_panel.pack(fill="x", pady=(0, 15))
@@ -1643,6 +1952,40 @@ class StudyApp(ctk.CTkFrame):
         feedback_label = ctk.CTkLabel(stats_panel, text="☆ Nhấn 'Bật Camera' để luyện tập.", fg_color="#2A2F35", corner_radius=8, height=45, text_color=T.MUTED, font=ctk.CTkFont(size=13), wraplength=350)
         feedback_label.pack(fill="x", padx=20, pady=(0, 20))
 
+        # =================================================================
+        # BỘ ĐIỀU KHIỂN NHIỆM VỤ 2 BƯỚC (CHỮ GỐC + DẤU CÂU)
+        # =================================================================
+        self.composite_sub_step = 0  # 0: Chữ thường, 1: Đang làm chữ gốc, 2: Đang quẹt dấu
+        self.current_base_char = None
+        self.current_mark_code = None
+
+        def setup_current_target_ui():
+            target_raw = get_current_target()
+            base_c, mark_c, is_comp = self.decompose_target_sign(target_raw)
+            
+            if is_comp:
+                self.composite_sub_step = 1
+                self.current_base_char = base_c
+                self.current_mark_code = mark_c
+                
+                self.target_name_label.configure(text=f"{target_raw}  (Bước 1/2: Chữ {base_c})")
+                load_practice_media(base_c) # Load ảnh chữ A trước
+                feedback_label.configure(text=f"☆ Học chữ {target_raw}: Hãy giơ tay tạo dáng chữ [{base_c}] trước.", fg_color="#102034", text_color=T.BLUE)
+            else:
+                self.composite_sub_step = 0
+                self.current_base_char = target_raw
+                self.current_mark_code = None
+                
+                self.target_name_label.configure(text=f"{target_raw}")
+                load_practice_media(target_raw)
+                feedback_label.configure(text=f"☆ Hãy thực hiện ký hiệu: {target_raw}", fg_color="#102034", text_color=T.BLUE)
+                
+            self.lesson_completed = False
+            self.success_frames = 0
+
+        # Khởi tạo giao diện câu đầu tiên
+        setup_current_target_ui()
+
         def toggle_camera():
             if self.practice_camera_on: stop_from_button()
             else: start_practice_camera()
@@ -1650,224 +1993,140 @@ class StudyApp(ctk.CTkFrame):
         toggle_btn = ctk.CTkButton(right_frame, text="▶ Bật Camera", height=55, fg_color=T.BLUE, hover_color=T.BLUE_DARK, font=ctk.CTkFont(size=18, weight="bold"), corner_radius=14, command=toggle_camera)
         toggle_btn.pack(fill="x")
 
-        # CỘT TRÁI (CAMERA)
-# ---------- CỘT TRÁI: CAMERA ----------
-        left_frame = ctk.CTkFrame(
-            body,
-            fg_color=T.PANEL,
-            corner_radius=16,
-            border_width=1,
-            border_color=T.BORDER
-        )
+        left_frame = ctk.CTkFrame(body, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
         left_frame.pack(side="left", fill="both", expand=True)
         left_frame.grid_rowconfigure(1, weight=1)
         left_frame.grid_columnconfigure(0, weight=1)
 
         cam_bar = ctk.CTkFrame(left_frame, fg_color="transparent")
         cam_bar.grid(row=0, column=0, sticky="ew", padx=20, pady=15)
-        
         self.practice_status_label = ctk.CTkLabel(cam_bar, text="● Camera đang tắt", fg_color="#2A2F35", corner_radius=8, text_color=T.MUTED, font=ctk.CTkFont(size=13, weight="bold"), padx=12, pady=6)
         self.practice_status_label.pack(side="left")
         
-# Khóa riêng kích thước khung camera, không cho ảnh camera làm giãn layout
-        REACTION_CAMERA_W = 720
-        REACTION_CAMERA_H = 430
-
-        camera_view = ctk.CTkFrame(
-            left_frame,
-            width=REACTION_CAMERA_W,
-            height=REACTION_CAMERA_H,
-            fg_color="#080C11",
-            corner_radius=12
-        )
+        REACTION_CAMERA_W, REACTION_CAMERA_H = 720, 430
+        camera_view = ctk.CTkFrame(left_frame, width=REACTION_CAMERA_W, height=REACTION_CAMERA_H, fg_color="#080C11", corner_radius=12)
         camera_view.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
         camera_view.grid_propagate(False)
-        camera_view.grid_rowconfigure(0, weight=1)
-        camera_view.grid_columnconfigure(0, weight=1)
+        camera_view.grid_rowconfigure(0, weight=1); camera_view.grid_columnconfigure(0, weight=1)
 
         self.practice_video_label = ctk.CTkLabel(camera_view, text="📷\n\nNhấn 'Bật Camera' để bắt đầu", font=ctk.CTkFont(size=20), text_color=T.MUTED_2)
         self.practice_video_label.grid(row=0, column=0, sticky="nsew")
 
-        # ==========================================
-        # LOGIC AI CỐT LÕI VÀ MÀN HÌNH CHÚC MỪNG
-        # ==========================================
         self.sequence_data = []
-        self.prev_wx = None
-        self.prev_wy = None
-        self.mp_hands = None
-        self.mp_draw = None
-        self.ai_session = None
-        self.ai_labels = None
-        
+        self.prev_wx = self.prev_wy = None
+        self.mp_hands = self.mp_draw = self.ai_session = self.ai_labels = None
         self.success_frames = 0
         self.lesson_completed = False
-        self.practice_start_time = None
 
+        # ==========================================
+        # VỊ TRÍ 2: TỰ ĐỘNG BUNG KHÓA QUÉT 2 TAY CHO GIAO TIẾP
+        # ==========================================
         def load_ai_dependencies():
+            import sys, os
+            root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+            if root_dir not in sys.path: sys.path.append(root_dir)
+            
             if self.mp_hands is None:
                 import mediapipe as mp
-                topic_type = lesson.get("topic_type", "alphabet")
-                max_hands = 2 if topic_type == "conversation" else 1
                 self.mp_hands = mp.solutions.hands.Hands(
-                    static_image_mode=False, max_num_hands=max_hands, min_detection_confidence=0.7
+                    static_image_mode=False, 
+                    max_num_hands=2,  # Luôn mở khóa quét tối đa 2 tay
+                    min_detection_confidence=0.7
                 )
                 self.mp_draw = mp.solutions.drawing_utils
-                
-            if self.ai_session is None:
-                try:
-                    import onnxruntime as ort
-                    import numpy as np
-                    import os
-                    if os.path.exists("model/model.onnx") and os.path.exists("model/labels.npy"):
-                        self.ai_session = ort.InferenceSession("model/model.onnx", providers=['CPUExecutionProvider'])
-                        self.ai_labels = np.load("model/labels.npy")
-                except Exception as e: print("Lỗi load AI model:", e)
+
+            # NẠP 2 SIÊU NÃO TỪ CORE (Chỉ nạp đúng 1 lần cho nhẹ RAM)
+            try:
+                from core.translate_window import load_lstm_model, load_lstm_model_both
+                if self.lstm_model_1 is None:
+                    self.lstm_model_1, self.action_labels_1 = load_lstm_model()
+                if self.lstm_model_2 is None:
+                    self.lstm_model_2, self.action_labels_2 = load_lstm_model_both()
+            except Exception as e:
+                print("[AI Study] Lỗi nạp siêu não LSTM:", e)
 
         def hand_vectorlize(landmarks, hand_type, prev_wx, prev_wy):
             import numpy as np
             wx, wy = landmarks[0].x, landmarks[0].y
             vector = []
-            for i in range(1, 21):
-                x = landmarks[i].x - wx
-                y = landmarks[i].y - wy
-                vector.extend([x, y])
-            if prev_wx is None or prev_wy is None:
-                delta_x = 0.0; delta_y = 0.0
-            else:
-                delta_x = wx - prev_wx; delta_y = wy - prev_wy
-            if abs(delta_x) < 0.008: delta_x = 0.0
-            if abs(delta_y) < 0.008: delta_y = 0.0
-            delta_x *= 30; delta_y *= 30    
+            for i in range(1, 21): vector.extend([landmarks[i].x - wx, landmarks[i].y - wy])
+            delta_x = 0.0 if prev_wx is None else (wx - prev_wx) * 30
+            delta_y = 0.0 if prev_wy is None else (wy - prev_wy) * 30
+            if abs(delta_x) < 0.24: delta_x = 0.0
+            if abs(delta_y) < 0.24: delta_y = 0.0
             vector.extend([hand_type, delta_x, delta_y])
             return np.array(vector), wx, wy
 
-        # BÍ KÍP 3: HÀM ĐỔI MỤC TIÊU (TỰ ĐỘNG NHẢY CHỮ)
-        # BÍ KÍP 3: HÀM ĐỔI MỤC TIÊU (TỰ ĐỘNG NHẢY CHỮ)
         def switch_to_next_target():
             self.current_target_idx += 1
-            next_letter = get_current_target()
-            next_lesson = self.get_lesson(next_letter)
-            
-            # CẬP NHẬT TÊN CHỮ CÁI MỚI LÊN UI
-            self.target_name_label.configure(text=f"Chữ {next_letter}")
-            
-            # Cập nhật ảnh mẫu
-            new_img = self.load_lesson_image(next_lesson, size=(90, 90))
-            if new_img:
-                img_label.configure(image=new_img, text="")
-                img_label.image = new_img
-            else:
-                img_label.configure(image=None, text=next_lesson.get("icon", "☝"))
-                
-            self.lesson_completed = False
-            self.success_frames = 0
-            feedback_label.configure(text=f"☆ Đã chuyển tiếp! Vui lòng thực hiện ký hiệu chữ {next_letter}.", fg_color="#102034", text_color=T.BLUE)
+            setup_current_target_ui()
+            feedback_label.configure(text=f"☆ Đã chuyển tiếp! Vui lòng thực hiện ký hiệu {get_current_target()}.", fg_color="#102034", text_color=T.BLUE)
 
-        # BÍ KÍP 4: BẢNG OVERLAY CHÚC MỪNG HOÀN THÀNH
-        # BÍ KÍP 2: BẢNG OVERLAY CHÚC MỪNG HOÀN THÀNH
         def show_victory():
             safe_stop()
             toggle_btn.pack_forget() 
-            
             overlay = ctk.CTkFrame(camera_view, fg_color="#080C11", corner_radius=12)
             overlay.place(relwidth=1, relheight=1)
             
             ctk.CTkLabel(overlay, text="🎉", font=ctk.CTkFont(size=90)).pack(pady=(60, 10))
             ctk.CTkLabel(overlay, text="HOÀN THÀNH XUẤT SẮC", font=ctk.CTkFont(size=24, weight="bold"), text_color=T.GREEN).pack(pady=(0, 10))
+            ctk.CTkLabel(overlay, text=f"Tuyệt vời! Bạn đã thực hiện thành công\nký hiệu {initial_letter}!", font=ctk.CTkFont(size=16), text_color=T.TEXT).pack(pady=(0, 30))
             
-            # XỬ LÝ LỜI CHÚC MỪNG ĐỘNG DỰA TRÊN NGỮ CẢNH
-            if practice_mode == "weak_signs":
-                msg = f"Tuyệt vời! Bạn đã khắc phục thành công\n{len(self.practice_targets)} ký hiệu thường làm sai!"
-            elif pair_list:
-                if len(pair_list) > 2:
-                    msg = f"Tuyệt vời! Bạn đã hoàn thành ôn tập\n{len(pair_list)} ký hiệu liên hoàn!"
-                else:
-                    msg = f"Tuyệt vời! Bạn đã phân biệt chính xác\ncặp chữ {pair_list[0]} và {pair_list[1]}!"
-            else:
-                msg = f"Tuyệt vời! Bạn đã thực hiện xuất sắc\nký hiệu chữ {initial_letter}!"
-                
-            ctk.CTkLabel(overlay, text=msg, font=ctk.CTkFont(size=16), text_color=T.TEXT, justify="center").pack(pady=(0, 30))
-            
-            btn_frame = ctk.CTkFrame(overlay, fg_color="transparent")
-            btn_frame.pack()
-            
+            btns = ctk.CTkFrame(overlay, fg_color="transparent")
+            btns.pack()
             def practice_again():
-                overlay.destroy() # Xóa overlay
-                toggle_btn.pack(fill="x") # Hiện lại nút bấm
-                
-                # ==========================================
-                # BÍ KÍP FIX LỖI: RESET TOÀN BỘ TRẠNG THÁI UI VỀ "TẮT"
-                # ==========================================
+                overlay.destroy(); toggle_btn.pack(fill="x")
                 toggle_btn.configure(text="▶ Bật Camera", fg_color=T.BLUE, hover_color=T.BLUE_DARK)
                 self.practice_status_label.configure(text="● Camera đang tắt", text_color=T.MUTED, fg_color="#2A2F35")
-                status_value_label.configure(text="Đã tắt", text_color=T.MUTED)
-                accuracy_value_label.configure(text="0%", text_color=T.BLUE)
-                acc_progress.set(0)
-                current_sign_label.configure(text="--", text_color=T.TEXT)
-                
-                # Xóa khung hình camera bị đóng băng
-                from PIL import Image
-                blank_img = Image.new('RGB', (10, 10), (8, 12, 17))
-                blank_ctk = ctk.CTkImage(light_image=blank_img, dark_image=blank_img, size=(10, 10))
-                self.practice_video_label.configure(image=blank_ctk, text="📷\n\nNhấn 'Bật Camera' để bắt đầu")
-                self.practice_video_label.image = blank_ctk
-                # ==========================================
-
-                # Reset về chữ đầu tiên của cặp ký hiệu
-                self.current_target_idx = 0
-                
-                # CẬP NHẬT TÊN CHỮ CÁI VỀ LẠI TỪ KHỞI ĐẦU
-                self.target_name_label.configure(text=f"Chữ {get_current_target()}")
-                
-                first_lesson = self.get_lesson(get_current_target())
-                new_img = self.load_lesson_image(first_lesson, size=(90, 90))
-                if new_img:
-                    img_label.configure(image=new_img, text="")
-                    img_label.image = new_img
-                else:
-                    img_label.configure(image=None, text=first_lesson.get("icon", "☝"))
-                    
+                status_value_label.configure(text="Đã tắt", text_color=T.MUTED); accuracy_value_label.configure(text="0%", text_color=T.BLUE)
+                acc_progress.set(0); current_sign_label.configure(text="--", text_color=T.TEXT)
+                setup_current_target_ui()
                 feedback_label.configure(text=f"☆ Đã khởi động lại. Nhấn 'Bật Camera' để bắt đầu.", fg_color="#2A2F35", text_color=T.MUTED)
 
-            # ==========================================
-            # TRẢ LẠI 2 NÚT BẤM BỊ MẤT Ở ĐÂY NÈ
-            # ==========================================
-            ctk.CTkButton(btn_frame, text="⟳ Luyện tập lại", font=ctk.CTkFont(size=15, weight="bold"), height=45, fg_color=T.PANEL, hover_color=T.CARD_HOVER, border_width=1, border_color=T.BORDER, command=practice_again).pack(side="left", padx=10)
-            ctk.CTkButton(btn_frame, text="← Trở về", font=ctk.CTkFont(size=15, weight="bold"), height=45, fg_color=T.BLUE, hover_color=T.BLUE_DARK, command=go_back).pack(side="left", padx=10)
+            ctk.CTkButton(btns, text="⟳ Luyện tập lại", font=ctk.CTkFont(weight="bold"), height=45, fg_color=T.PANEL, border_width=1, border_color=T.BORDER, command=practice_again).pack(side="left", padx=10)
+            ctk.CTkButton(btns, text="← Trở về", font=ctk.CTkFont(weight="bold"), height=45, fg_color=T.BLUE, command=go_back).pack(side="left", padx=10)
 
         def record_success(final_accuracy):
             import sys, os, time
-            sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-            is_logged_in = False # Cờ kiểm tra trạng thái đăng nhập
             try:
                 import auth_ui, user_db
                 if auth_ui.CURRENT_USER is not None:
-                    is_logged_in = True
                     user_id = auth_ui.CURRENT_USER["id"]
-                    current_eval_letter = get_current_target() 
-                    if current_eval_letter not in auth_ui.LEARNED_LETTERS:
-                        user_db.mark_as_learned(user_id, current_eval_letter)
-                        auth_ui.LEARNED_LETTERS.append(current_eval_letter)
-                    session_time = max(1, int((time.time() - self.practice_start_time) / 60))
-                    updated_stats = user_db.update_study_stats(user_id, int(final_accuracy * 100), session_time)
-                    if updated_stats:
-                        auth_ui.CURRENT_USER.update(updated_stats)
-            except Exception: pass
+                    curr_t = get_current_target()
+                    if curr_t not in auth_ui.LEARNED_LETTERS:
+                        user_db.mark_as_learned(user_id, curr_t)
+                        auth_ui.LEARNED_LETTERS.append(curr_t)
+                        
+                    # ==========================================================
+                    # BÍ KÍP VÀNG: TỰ ĐỘNG CHỐT GIỜ & PHÂN LUỒNG KHI HOÀN THÀNH
+                    # ==========================================================
+                    # 1. Tính số phút đã đứng trước camera (ít nhất là cộng 1 phút)
+                    start_t = getattr(self, "practice_start_time", time.time())
+                    elapsed_mins = max(1, int((time.time() - start_t) / 60))
+                    
+                    # 2. Phân loại xem bài này là Giao tiếp hay Bảng chữ cái
+                    check_val = str(initial_letter).strip().upper()
+                    is_conv = lesson.get("topic_type") == "conversation" or (len(check_val) > 2 and not check_val.startswith("DAU_"))
+                    target_type = "conversation" if is_conv else "alphabet"
+                    
+                    # 3. Gửi hỏa tốc xuống DB
+                    updated = user_db.update_study_stats(
+                        user_id, 
+                        int(final_accuracy * 100), 
+                        time_minutes=elapsed_mins, 
+                        topic_type=target_type
+                    )
+                    if updated:
+                        auth_ui.CURRENT_USER.update(updated)
+            except Exception as e: 
+                print("Lỗi chốt giờ camera:", e)
 
-            # PHÂN NHÁNH LOGIC: Đi tiếp hay Hoàn thành?
             if self.current_target_idx < len(self.practice_targets) - 1:
                 status_value_label.configure(text="Tốt lắm!", text_color=T.GREEN)
-                feedback_label.configure(text=f"☆ Đã hoàn thành chữ {get_current_target()}! Chuẩn bị chuyển tiếp...", fg_color="#17351F", text_color=T.GREEN)
                 self.after(1500, switch_to_next_target) 
             else:
                 status_value_label.configure(text="Hoàn thành!", text_color=T.GREEN)
-                
-                # BÍ KÍP XỬ LÝ GIAO DIỆN KHI CHƯA ĐĂNG NHẬP
-                if is_logged_in:
-                    feedback_label.configure(text="☆ Xuất sắc! Hệ thống đã lưu lại tiến độ của bạn.", fg_color="#17351F", text_color=T.GREEN)
-                else:
-                    feedback_label.configure(text="☆ Xuất sắc! Vui lòng Đăng nhập để lưu lại tiến độ nhé.", fg_color="#332200", text_color=T.ORANGE)
-                    
+                feedback_label.configure(text="☆ Xuất sắc! Bạn đã làm đúng hoàn toàn.", fg_color="#17351F", text_color=T.GREEN)
                 self.after(1200, show_victory)
 
         def update_practice_frame():
@@ -1876,180 +2135,189 @@ class StudyApp(ctk.CTkFrame):
             try:
                 success, frame = self.practice_cap.read()
                 if success:
-                    import cv2
-                    import numpy as np
-                    import mediapipe as mp
-                    from PIL import Image
-
-                    frame = cv2.flip(frame, 1)
-                    h, w = frame.shape[:2]
+                    self.practice_frame_counter += 1
+                    
+                    import cv2, numpy as np, mediapipe as mp, PIL.Image
+                    frame = cv2.flip(frame, 1); h, w = frame.shape[:2]
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     
-                    predicted_char = ""
-                    target_confidence = 0.0 
                     hand_detected = False
                     
-                    current_eval_letter = get_current_target() # Lấy mục tiêu hiện hành
+                    if self.composite_sub_step == 1: current_eval_letter = self.current_base_char
+                    elif self.composite_sub_step == 2: current_eval_letter = self.current_mark_code
+                    else: current_eval_letter = get_current_target()
+
+                    is_dynamic_mark = current_eval_letter.startswith("DAU_") or "DẤU" in current_eval_letter.upper()
+                    required_frames = 7 if is_dynamic_mark else 15
                     
                     if self.mp_hands is not None:
                         results = self.mp_hands.process(frame_rgb)
-                        if results.multi_hand_landmarks:
+                        hands_detected = len(results.multi_hand_landmarks) if results.multi_hand_landmarks else 0
+                        
+                        if hands_detected > 0:
                             hand_detected = True
-                            for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
-                                self.mp_draw.draw_landmarks(frame, hand_landmarks, mp.solutions.hands.HAND_CONNECTIONS)
-                                label_hand = handedness.classification[0].label
-                                hand_type = 0 if label_hand == "Left" else 1
-                                vector, self.prev_wx, self.prev_wy = hand_vectorlize(hand_landmarks.landmark, hand_type, self.prev_wx, self.prev_wy)
-                                self.sequence_data.append(vector)
+                            # Vẽ xương tay
+                            for hl in results.multi_hand_landmarks:
+                                self.mp_draw.draw_landmarks(frame, hl, mp.solutions.hands.HAND_CONNECTIONS)
                                 
-                                if len(self.sequence_data) > 30:
-                                    self.sequence_data.pop(0)
+                            try:
+                                # Nhập cỗ máy trích xuất feature từ core giống hệt ui_user.py
+                                from core.train_window import hand_vectorlize
+                                from core.train_window_both import extract_86_features
+                                from core.translate_window import predict_sign
+                            except Exception: pass
+
+                            # ==========================================
+                            # LUỒNG 1: SUY LUẬN MÔ HÌNH 1 TAY (43 Dims)
+                            # ==========================================
+                            if hands_detected == 1 and self.lstm_model_1 is not None:
+                                self.seq_2_hands.clear() # Xóa tàn dư 2 tay
+                                
+                                handedness = results.multi_handedness[0]
+                                hand_landmarks = results.multi_hand_landmarks[0]
+                                hand_type = 0 if handedness.classification[0].label == "Left" else 1
+                                
+                                vec_43, self.prev_wx_l, self.prev_wy_l = hand_vectorlize(
+                                    hand_landmarks.landmark, hand_type, self.prev_wx_l, self.prev_wy_l
+                                )
+                                
+                                self.seq_1_hand.append(vec_43)
+                                if len(self.seq_1_hand) > 30: self.seq_1_hand.pop(0)
+                                
+                                # Throttling: 5 frame chấm AI 1 lần
+                                if len(self.seq_1_hand) == 30 and (self.practice_frame_counter % 5 == 0):
+                                    pred_txt, prob = predict_sign(self.lstm_model_1, self.action_labels_1, self.seq_1_hand)
+                                    self.cached_predicted_char = pred_txt
                                     
-                                if len(self.sequence_data) == 30 and self.ai_session is not None:
-                                    try:
-                                        input_data = np.expand_dims(self.sequence_data, axis=0).astype(np.float32)
-                                        input_name = self.ai_session.get_inputs()[0].name
-                                        out = self.ai_session.run(None, {input_name: input_data})[0][0]
-                                        max_prob, max_index = np.max(out), np.argmax(out)
-                                        if max_prob > 0.5:
-                                            predicted_char = str(self.ai_labels[max_index]).upper()
+                                    # Chấm điểm: Nếu AI đọc ra đúng chữ đang học thì ghi nhận %
+                                    if pred_txt.upper() == current_eval_letter.upper():
+                                        self.cached_target_confidence = prob
+                                    else:
+                                        self.cached_target_confidence = 0.0 if prob > 0.5 else self.cached_target_confidence
+
+                            # ==========================================
+                            # LUỒNG 2: SUY LUẬN MÔ HÌNH 2 TAY (86 Dims)
+                            # ==========================================
+                            elif hands_detected == 2 and self.lstm_model_2 is not None:
+                                self.seq_1_hand.clear() # Xóa tàn dư 1 tay
+                                
+                                vec_86, self.prev_wx_l, self.prev_wy_l, self.prev_wx_r, self.prev_wy_r = extract_86_features(
+                                    results, self.prev_wx_l, self.prev_wy_l, self.prev_wx_r, self.prev_wy_r
+                                )
+                                
+                                if vec_86 is not None:
+                                    self.seq_2_hands.append(vec_86)
+                                    if len(self.seq_2_hands) > 30: self.seq_2_hands.pop(0)
+                                    
+                                    if len(self.seq_2_hands) == 30 and (self.practice_frame_counter % 5 == 0):
+                                        pred_txt, prob = predict_sign(self.lstm_model_2, self.action_labels_2, self.seq_2_hands)
+                                        self.cached_predicted_char = pred_txt
                                         
-                                        # BÍ KÍP: Luôn chấm điểm dựa trên mục tiêu hiện tại
-                                        for idx, lbl in enumerate(self.ai_labels):
-                                            if str(lbl).upper() == current_eval_letter.upper():
-                                                target_confidence = float(out[idx])
-                                                break
-                                    except: pass
+                                        if pred_txt.upper() == current_eval_letter.upper():
+                                            self.cached_target_confidence = prob
+                                        else:
+                                            self.cached_target_confidence = 0.0 if prob > 0.5 else self.cached_target_confidence
                         else:
-                            self.sequence_data.clear()
-                            self.prev_wx, self.prev_wy = None, None
+                            self.seq_1_hand.clear(); self.seq_2_hands.clear()
+                            self.prev_wx_l = self.prev_wy_l = self.prev_wx_r = self.prev_wy_r = None
+
+                    # --- XUẤT KẾT QUẢ TỪ CACHE RA GIAO DIỆN ---
+                    predicted_char = self.cached_predicted_char
+                    target_confidence = self.cached_target_confidence
 
                     if target_confidence > 0.8:
                         ui_color = T.GREEN
-                        bgr_color = (0, 200, 0)
-                        
                         if not self.lesson_completed:
                             self.success_frames += 1
-                            if self.success_frames > 15: 
-                                self.lesson_completed = True
-                                record_success(target_confidence)
-                    elif target_confidence > 0.4:
-                        ui_color = T.YELLOW
-                        bgr_color = (0, 215, 255)
-                        self.success_frames = 0 
-                    else:
-                        ui_color = T.ORANGE
-                        bgr_color = (0, 140, 255)
-                        self.success_frames = 0
-                        
-                    if not hand_detected:
-                        ui_color = T.BLUE
-                        bgr_color = (255, 144, 30)
+                            if self.success_frames >= required_frames: 
+                                if self.composite_sub_step == 1:
+                                    self.composite_sub_step = 2
+                                    self.success_frames = 0
+                                    self.seq_1_hand.clear(); self.seq_2_hands.clear()
+                                    self.prev_wx_l = self.prev_wy_l = self.prev_wx_r = self.prev_wy_r = None
+                                    self.cached_predicted_char = ""; self.cached_target_confidence = 0.0
 
-                    if hand_detected:
-                        cv2.putText(frame, f"Do chinh xac: {int(target_confidence*100)}%", (18, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.8, bgr_color, 2)
+                                    mark_disp = self.get_mark_display_name(self.current_mark_code)
+                                    self.target_name_label.configure(text=f"{get_current_target()}  (Bước 2/2: {mark_disp})")
+                                    load_practice_media(self.current_mark_code) 
+                                    feedback_label.configure(text=f"☆ Chuẩn dáng chữ! Giữ tay và thực hiện [{mark_disp}] nào!", fg_color="#17351F", text_color=T.GREEN)
+                                else:
+                                    self.lesson_completed = True
+                                    record_success(target_confidence)
+                    elif target_confidence > 0.4: ui_color = T.YELLOW; self.success_frames = 0 
+                    else: ui_color = T.ORANGE; self.success_frames = 0
+                    if not hand_detected: ui_color = T.BLUE
 
                     if predicted_char:
-                        current_sign_label.configure(text=predicted_char, text_color=ui_color if predicted_char == current_eval_letter else T.ORANGE)
-                    else:
-                        current_sign_label.configure(text="--", text_color=T.TEXT)
+                        display_text = predicted_char
+                        if display_text.startswith("DAU_"): display_text = self.get_mark_display_name(display_text).upper()
+                        current_sign_label.configure(text=display_text, text_color=ui_color if predicted_char == current_eval_letter else T.ORANGE)
+                    else: current_sign_label.configure(text="--", text_color=T.TEXT)
                         
                     if hand_detected:
-                        acc_progress.configure(progress_color=ui_color)
-                        acc_progress.set(target_confidence)
+                        acc_progress.configure(progress_color=ui_color); acc_progress.set(target_confidence)
                         accuracy_value_label.configure(text=f"{int(target_confidence * 100)}%", text_color=ui_color)
-                        
-                        if not self.lesson_completed:
-                            if target_confidence > 0.8:
-                                status_value_label.configure(text="Tuyệt vời!", text_color=ui_color)
-                                feedback_label.configure(text="☆ Chính xác! Giữ nguyên tay để hệ thống ghi nhớ.", fg_color="#17351F", text_color=ui_color)
-                            elif target_confidence > 0.4:
-                                status_value_label.configure(text="Gần đúng", text_color=ui_color)
-                                feedback_label.configure(text="☆ Bạn đang đi đúng hướng, thử điều chỉnh ngón tay một chút.", fg_color="#332200", text_color=ui_color)
-                            else:
-                                status_value_label.configure(text="Chưa khớp", text_color=ui_color)
-                                feedback_label.configure(text="☆ Vui lòng điều chỉnh lại dáng tay cho giống ảnh mẫu.", fg_color="#332200", text_color=ui_color)
+                        if not self.lesson_completed and self.composite_sub_step != 2:
+                            if target_confidence > 0.8: status_value_label.configure(text="Tuyệt vời!", text_color=ui_color)
+                            elif target_confidence > 0.4: status_value_label.configure(text="Gần đúng", text_color=ui_color)
+                            else: status_value_label.configure(text="Chưa khớp", text_color=ui_color)
                     else:
-                        accuracy_value_label.configure(text="0%", text_color=T.BLUE)
-                        acc_progress.configure(progress_color=T.BLUE)
-                        acc_progress.set(0)
-                        if not self.lesson_completed:
-                            status_value_label.configure(text="Đang tìm tay...", text_color=T.BLUE)
-                            feedback_label.configure(text="☆ Hãy đưa tay vào camera để bắt đầu.", fg_color="#102034", text_color=T.BLUE)
+                        accuracy_value_label.configure(text="0%", text_color=T.BLUE); acc_progress.set(0)
+                        if not self.lesson_completed: status_value_label.configure(text="Đang tìm tay...", text_color=T.BLUE)
 
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    # Render camera theo khung cố định, không để ảnh camera kéo giãn giao diện
-                    display_w = REACTION_CAMERA_W
-                    display_h = REACTION_CAMERA_H
-
-                    scale = min(display_w / w, display_h / h)
+                    scale = min(REACTION_CAMERA_W / w, REACTION_CAMERA_H / h)
                     new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
-                    
-                    frame_resized = cv2.resize(frame_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
-
-                    img = Image.fromarray(frame_resized)
+                    img = PIL.Image.fromarray(cv2.resize(frame_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA))
                     imgtk = ctk.CTkImage(light_image=img, dark_image=img, size=(new_w, new_h))
-                    
-                    self.practice_video_label.configure(image=imgtk, text="")
-                    self.practice_video_label.image = imgtk
+                    self.practice_video_label.configure(image=imgtk, text=""); self.practice_video_label.image = imgtk
             except Exception as e: print("Lỗi khung hình camera:", e)
 
-            if self.practice_camera_on:
-                self.practice_after_id = self.after(10, update_practice_frame)
+            if self.practice_camera_on: self.practice_after_id = self.after(15, update_practice_frame)
 
         def start_practice_camera():
-            import cv2
-            import os
-            import time
-            if self.practice_cap is not None:
-                self.practice_cap.release()
-            
-            load_ai_dependencies()
-            
-            self.success_frames = 0
-            self.lesson_completed = False
+            import cv2, time
+            if self.practice_cap: self.practice_cap.release()
+            load_ai_dependencies(); setup_current_target_ui()
             self.practice_start_time = time.time()
             
-            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(0)
-            if not cap.isOpened():
-                from tkinter import messagebox
-                messagebox.showerror("Lỗi", "Không mở được camera.")
-                cap.release()
-                return
-            self.practice_cap = cap
-            self.practice_camera_on = True
+            # Khởi tạo 2 luồng bám đuổi vector độc lập cho 1 tay và 2 tay
+            self.seq_1_hand = []
+            self.seq_2_hands = []
+            self.prev_wx_l = self.prev_wy_l = None
+            self.prev_wx_r = self.prev_wy_r = None
             
-            self.practice_status_label.configure(text="● Camera đang bật", text_color=T.GREEN, fg_color="#17351F")
-            toggle_btn.configure(text="■ Tắt Camera", fg_color=T.RED, hover_color="#D32F2F")
+            self.practice_frame_counter = 0
+            self.cached_predicted_char = ""
+            self.cached_target_confidence = 0.0
+
+            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(0)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            
+            if not cap.isOpened(): return
+            self.practice_cap = cap; self.practice_camera_on = True
+            self.practice_status_label.configure(text="● Camera đang bật", text_color=T.GREEN)
+            toggle_btn.configure(text="■ Tắt Camera", fg_color=T.RED)
             update_practice_frame()
 
         def stop_from_button():
             safe_stop()
-            self.sequence_data.clear()
-            self.prev_wx, self.prev_wy = None, None
-            
-            self.current_target_idx = 0
-            first_lesson = self.get_lesson(get_current_target())
-            new_img = self.load_lesson_image(first_lesson, size=(90, 90))
-            if new_img:
-                img_label.configure(image=new_img, text="")
-                img_label.image = new_img
-            else:
-                img_label.configure(image=None, text=first_lesson.get("icon", "☝"))
-            
-            toggle_btn.configure(text="▶ Bật Camera", fg_color=T.BLUE, hover_color=T.BLUE_DARK)
-            self.practice_status_label.configure(text="● Camera đang tắt", text_color=T.MUTED, fg_color="#2A2F35")
-            status_value_label.configure(text="Đã tắt", text_color=T.MUTED)
-            accuracy_value_label.configure(text="0%", text_color=T.BLUE)
-            acc_progress.set(0)
-            current_sign_label.configure(text="--", text_color  =T.TEXT)
-            feedback_label.configure(text="☆ Camera đã tắt. Nhấn 'Bật Camera' để luyện tập.", fg_color="#2A2F35", text_color=T.MUTED)
-            
+            self.seq_1_hand.clear(); self.seq_2_hands.clear()
+            self.prev_wx_l = self.prev_wy_l = self.prev_wx_r = self.prev_wy_r = None
+            self.cached_predicted_char = ""; self.cached_target_confidence = 0.0
+
+            self.current_target_idx = 0; setup_current_target_ui()
+            toggle_btn.configure(text="▶ Bật Camera", fg_color=T.BLUE)
+            self.practice_status_label.configure(text="● Camera đang tắt", text_color=T.MUTED)
+            status_value_label.configure(text="Đã tắt", text_color=T.MUTED); accuracy_value_label.configure(text="0%", text_color=T.BLUE)
+            acc_progress.set(0); current_sign_label.configure(text="--", text_color=T.TEXT)
             from PIL import Image
             blank_img = Image.new('RGB', (10, 10), (8, 12, 17))
             blank_ctk = ctk.CTkImage(light_image=blank_img, dark_image=blank_img, size=(10, 10))
-            self.practice_video_label.configure(image=blank_ctk, text="📷\n\nNhấn 'Bật Camera' để bắt đầu")
-            self.practice_video_label.image = blank_ctk
+            self.practice_video_label.configure(image=blank_ctk, text="📷\n\nNhấn 'Bật Camera' để bắt đầu"); self.practice_video_label.image = blank_ctk
     def remove_duplicate_topics(self, items):
         """
         Lọc chủ đề bị lặp theo tiêu đề trước khi hiển thị.
@@ -2123,14 +2391,15 @@ class StudyApp(ctk.CTkFrame):
             "TỪ VỰNG & GIAO TIẾP", 
             "Học từ vựng và các mẫu câu giao tiếp hằng ngày", 
             combined_topics, 
-            right_title="Chủ đề hôm nay", 
+            right_title="Chủ đề phổ biến",
             cta="Bắt đầu học", 
             conversation=True
         )
 
     def topic_page(self, title, subtitle, items, right_title, cta, conversation=False):
+        import math
+        
         items = self.remove_duplicate_topics(items)
-
         items = items or [{
             "title": "Chưa có dữ liệu",
             "icon": "?",
@@ -2156,39 +2425,38 @@ class StudyApp(ctk.CTkFrame):
             text="←  Trang chính"
         ).pack(anchor="e", pady=(0, 8))
 
-        ctk.CTkLabel(
-            header_right,
-            text="☝  💬",
-            font=ctk.CTkFont(size=46),
-            text_color=T.BLUE
-        ).pack(anchor="e")
+        ctk.CTkLabel(header_right, text="☝  💬", font=ctk.CTkFont(size=46), text_color=T.BLUE).pack(anchor="e")
 
         # --- LƯỚI BÀI HỌC BÊN TRÁI ---
         grid = ctk.CTkFrame(page, fg_color="transparent")
-        # BÍ KÍP 1: Dùng sticky="new" (North-East-West) để ép khối này bám sát lên mép trên
-        grid.grid(row=2, column=0, sticky="new", padx=(0, 25), pady=(20, 0)) 
+        grid.grid(row=2, column=0, sticky="nsew", padx=(0, 25), pady=(20, 0)) 
+        
+        page.grid_rowconfigure(2, weight=1)
         for c in range(3):
             grid.grid_columnconfigure(c, weight=1)
+        for r in range(math.ceil(len(items) / 3)):
+            grid.grid_rowconfigure(r, weight=1)
+
         for idx, it in enumerate(items):
             r, c = divmod(idx, 3)
             self.big_topic_card(grid, r, c, it)
 
         # --- THẺ CHỦ ĐỀ HÔM NAY BÊN PHẢI ---
         side = ctk.CTkFrame(page, width=330, fg_color="transparent")
-        # BÍ KÍP 2: Bỏ rowspan=2 và dùng sticky="new" để nó nằm ngang hàng tuyệt đối với lưới bên trái
-        side.grid(row=2, column=1, sticky="new", pady=(20, 0)) 
+        side.grid(row=2, column=1, sticky="nsew", pady=(20, 0)) 
         side.grid_propagate(False)
         
         highlight = ctk.CTkFrame(side, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BLUE)
-        highlight.pack(fill="x")
+        highlight.pack(fill="both", expand=True) 
         ctk.CTkLabel(highlight, text=f"★  {right_title}", font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT).pack(anchor="w", padx=18, pady=(20, 14))
+        
         first = items[0]
-        color = COLOR_MAP[first["color"]]
+        color = COLOR_MAP[first.get("color", "blue")]
         top = ctk.CTkFrame(highlight, fg_color=T.CARD, corner_radius=13, border_width=0)
         top.pack(fill="x", padx=18)
-        self.icon_box(top, first["icon"], color, size=62, font_size=22).grid(row=0, column=0, padx=16, pady=16, rowspan=2)
-        ctk.CTkLabel(top, text=first["title"], font=ctk.CTkFont(size=19, weight="bold"), text_color=T.TEXT).grid(row=0, column=1, sticky="sw", pady=(18, 0))
-        ctk.CTkLabel(top, text="Phổ biến", fg_color="#17351F", corner_radius=6, text_color=T.GREEN, font=ctk.CTkFont(size=12)).grid(row=1, column=1, sticky="nw", pady=(5, 15))
+        
+        self.icon_box(top, first.get("icon", "?"), color, size=62, font_size=22).grid(row=0, column=0, padx=16, pady=16)
+        ctk.CTkLabel(top, text=first.get("title", ""), font=ctk.CTkFont(size=19, weight="bold"), text_color=T.TEXT).grid(row=0, column=1, sticky="w", pady=0)
         
         if conversation:
             phrases = ["1  Xin chào", "2  Cảm ơn", "3  Tôi", "4  Tên"]
@@ -2200,34 +2468,38 @@ class StudyApp(ctk.CTkFrame):
             pb.pack(fill="x", padx=18, pady=(8, 10))
             pb.set(first.get("done", 0) / first.get("total", 1))
             
-        ctk.CTkButton(highlight, text=f"▶  {cta}", height=50, fg_color=T.BLUE, command=lambda key=first.get("first_label", "D") if isinstance(first, dict) else "D": self.show_lesson(key)).pack(fill="x", padx=18, pady=(12, 18))
+        first_lbl = first.get("first_label", "D") if isinstance(first, dict) else "D"
+        ctk.CTkButton(highlight, text=f"▶  {cta}", height=50, fg_color=T.BLUE, command=lambda key=first_lbl: self.show_lesson(key)).pack(side="bottom", fill="x", padx=18, pady=18)
 
-        # --- BÍ KÍP 3: THANH TỔNG QUAN HỌC TẬP (CĂN TRÁI & ÉP NHỎ) ---
+        # --- THANH TỔNG QUAN HỌC TẬP (BÊN TRÁI Ở DƯỚI) ---
         stats_bar = ctk.CTkFrame(page, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
-        # Bóp nhỏ pady=(15, 0) để khung sát lên trên, không gây tràn màn hình (chống cuộn)
         stats_bar.grid(row=3, column=0, columnspan=2, sticky="ew", padx=(0, 25), pady=(15, 0))
         
-        # 1. HÀNG 1: Tiêu đề nằm góc trên cùng bên trái
         header_stats = ctk.CTkFrame(stats_bar, fg_color="transparent")
         header_stats.pack(fill="x", padx=20, pady=(12, 6))
         ctk.CTkLabel(header_stats, text="↗", font=ctk.CTkFont(size=18, weight="bold"), text_color=T.BLUE).pack(side="left", padx=(0, 8))
         ctk.CTkLabel(header_stats, text="Tổng quan học tập", font=ctk.CTkFont(size=16, weight="bold"), text_color=T.TEXT).pack(side="left")
 
-        # Nét kẻ ngang mỏng phân cách tiêu đề và số liệu
         ctk.CTkFrame(stats_bar, height=1, fg_color="#2A3038").pack(fill="x", padx=20, pady=(0, 10))
 
-        # 2. HÀNG 2: Vùng chứa 3 KPI nằm ngang bên dưới
         kpi_container = ctk.CTkFrame(stats_bar, fg_color="transparent")
         kpi_container.pack(fill="x", expand=True, padx=20, pady=(0, 15))
         kpi_container.grid_columnconfigure((0, 1, 2), weight=1)
 
-        # Lấy dữ liệu thời gian học thật
         import sys, os
         sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
         try:
-            import auth_ui
+            import auth_ui, user_db
             user_data = auth_ui.CURRENT_USER or {}
-            thoi_gian_phut = user_data.get("ThoiGianHoc", 0)
+            user_id = user_data.get("id")
+            
+            if user_id:
+                conn = user_db.get_conn()
+                cursor = conn.cursor()
+                cursor.execute("SELECT ISNULL(ThoiGianGiaoTiep, 0) FROM TaiKhoan WHERE ID = ?", (user_id,))
+                thoi_gian_phut = cursor.fetchone()[0]
+            else:
+                thoi_gian_phut = 0
         except Exception:
             thoi_gian_phut = 0
             
@@ -2236,10 +2508,11 @@ class StudyApp(ctk.CTkFrame):
         thoi_gian_str = f"{gio}h {phut}m" if gio > 0 else f"{phut}m"
 
         total_topics = len(items) if items and items[0].get("title") != "Chưa có dữ liệu" else 0
-        # Chủ đề được tính là "Hoàn thành" nếu số bài đã học (done) >= tổng số bài (total)
         completed_topics = sum(1 for it in items if it.get("done", 0) >= it.get("total", 1) and it.get("total", 1) > 0)
         
-        # Cộng dồn toàn bộ bài học của trang này
+        # ==========================================================
+        # 2 DÒNG BỊ MẤT TÍCH ĐÃ ĐƯỢC PHỤC HỒI:
+        # ==========================================================
         total_lessons = sum(it.get("total", 1) for it in items) if total_topics > 0 else 0
         done_lessons = sum(it.get("done", 0) for it in items) if total_topics > 0 else 0
 
@@ -2249,10 +2522,8 @@ class StudyApp(ctk.CTkFrame):
             ("🕘", "Thời gian học", thoi_gian_str, T.BLUE)
         ]
 
-        # Đổ dữ liệu thành 3 cột ngang hàng
         for i, (icon, label, value, color) in enumerate(kpis):
             cell = ctk.CTkFrame(kpi_container, fg_color="transparent")
-            # Căn giữa các cụm KPI trong cột của nó
             cell.grid(row=0, column=i, sticky="ns") 
             
             ctk.CTkLabel(cell, text=icon, font=ctk.CTkFont(size=26), text_color=color).pack(side="left", padx=(0, 12))
@@ -2260,39 +2531,35 @@ class StudyApp(ctk.CTkFrame):
             box.pack(side="left")
             ctk.CTkLabel(box, text=label, font=ctk.CTkFont(size=13), text_color=T.MUTED).pack(anchor="w", pady=(0, 2))
             ctk.CTkLabel(box, text=value, font=ctk.CTkFont(size=16, weight="bold"), text_color=color).pack(anchor="w")
+
     def big_topic_card(self, parent, row, col, item):
-        color = COLOR_MAP[item["color"]]
+        color = COLOR_MAP[item.get("color", "blue")]
         
-        # Khung ngoài (Khóa cứng chiều cao 180px giống hệt trang chủ)
-        card = ctk.CTkFrame(parent, height=180, fg_color=T.CARD, border_width=0, corner_radius=14)
-        card.grid(row=row, column=col, sticky="nsew", padx=(0 if col == 0 else 16, 0), pady=(0 if row == 0 else 16, 16))
-        card.grid_propagate(False) 
+        card = ctk.CTkFrame(parent, fg_color=T.CARD, border_width=0, corner_radius=14)
+        card.grid(row=row, column=col, sticky="nsew", padx=(0 if col == 0 else 16, 0), pady=(0 if row == 0 else 16, 0))
 
-        # Hàng 1: Icon và Text xếp cạnh nhau
         content = ctk.CTkFrame(card, fg_color="transparent")
-        content.pack(fill="x", padx=14, pady=(18, 0))
+        content.pack(fill="both", expand=True, padx=14, pady=(18, 0))
 
-        # Icon box thu nhỏ lại size=55 giống trang chủ
-        icon_box = self.icon_box(content, item["icon"], color, size=55, font_size=22)
+        icon_box = self.icon_box(content, item.get("icon", "?"), color, size=55, font_size=22)
         icon_box.pack(side="left", anchor="nw")
 
         text_box = ctk.CTkFrame(content, fg_color="transparent")
         text_box.pack(side="left", fill="both", expand=True, padx=(12, 0))
 
-        # Logic cắt chữ thông minh để không bị tràn khung
-        title_text = item["title"]
+        title_text = item.get("title", "")
         if len(title_text) > 18: title_text = title_text[:15] + "..."
         
         desc_text = item.get("desc", "")
         if len(desc_text) > 42:
             cut = desc_text.rfind(' ', 0, 39)
-            if cut == -1: cut = 39
+            if cut == -1: 
+                cut = 39
             desc_text = desc_text[:cut] + "..."
 
         ctk.CTkLabel(text_box, text=title_text, font=ctk.CTkFont(family=T.FONT, size=16, weight="bold"), text_color=T.TEXT, anchor="w", justify="left").pack(fill="x")
         ctk.CTkLabel(text_box, text=desc_text, font=ctk.CTkFont(family=T.FONT, size=12), text_color=T.MUTED, anchor="w", justify="left", wraplength=120).pack(fill="x", pady=(4, 0))
 
-        # Hàng 2: Thanh tiến độ và Thống kê (Bám chặt xuống đáy)
         bottom = ctk.CTkFrame(card, fg_color="transparent")
         bottom.pack(side="bottom", fill="x", pady=(0, 14), padx=14)
 
@@ -2310,11 +2577,8 @@ class StudyApp(ctk.CTkFrame):
         count_text = f"{done} / {total} {loai_bai}"
         
         ctk.CTkLabel(stat_row, text=count_text, font=ctk.CTkFont(family=T.FONT, size=13, weight="bold"), text_color=color).pack(side="left")
-        
-        # Bỏ nút bấm vướng víu, thay bằng mũi tên gọn gàng
         ctk.CTkLabel(stat_row, text="›", font=ctk.CTkFont(size=28), text_color=T.MUTED).pack(side="right")
         
-        # Bắt sự kiện click cho toàn bộ bề mặt Card
         def on_click(e):
             self.show_lesson(item.get("first_label", "D"))
             
@@ -2417,13 +2681,25 @@ class StudyApp(ctk.CTkFrame):
         
         ctk.CTkButton(challenge, text="▶  Bắt đầu thi", height=48, font=ctk.CTkFont(size=14, weight="bold"), fg_color=T.BLUE, hover_color=T.BLUE_DARK, command=self.show_quick_quiz).pack(fill="x", padx=20, pady=(0, 20))
 
+        # (Tìm đoạn này ở phần cuối của show_review)
         try:
+            import auth_ui, user_db
             user_data = auth_ui.CURRENT_USER or {}
-            chuoi_ngay = user_data.get("ChuoiNgayHoc", 0)
-            do_chinh_xac = user_data.get("DoChinhXacTB", 0)
-            thoi_gian_phut = user_data.get("ThoiGianHoc", 0)
+            user_id = user_data.get("id")
+            
+            if user_id:
+                stats_row = user_db.get_user_minigame_stats(user_id) or {}
+                do_chinh_xac = stats_row.get("DoChinhXacTB", 0)
+                chuoi_ngay = stats_row.get("ChuoiNgayHoc", 0)
+                
+                conn = user_db.get_conn()
+                cursor = conn.cursor()
+                cursor.execute("SELECT ISNULL(ThoiGianGiaoTiep, 0) FROM TaiKhoan WHERE ID = ?", (user_id,))
+                thoi_gian_phut = cursor.fetchone()[0]
+            else:
+                do_chinh_xac, chuoi_ngay, thoi_gian_phut = 0, 0, 0
         except Exception:
-            chuoi_ngay, do_chinh_xac, thoi_gian_phut = 0, 0, 0
+            do_chinh_xac, chuoi_ngay, thoi_gian_phut = 0, 0, 0
             
         gio = thoi_gian_phut // 60
         phut = thoi_gian_phut % 60

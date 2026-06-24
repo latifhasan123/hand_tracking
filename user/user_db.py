@@ -62,22 +62,31 @@ def mark_as_learned(user_id, lesson):
     except Exception as e:
         print("Lỗi lưu tiến độ:", e)
         return False
-def update_study_stats(user_id, accuracy, time_minutes):
+def update_study_stats(user_id, accuracy, time_minutes=0, session_time_minutes=None, topic_type="alphabet"):
     """
-    Hàm chuẩn của Kỹ sư Backend: Tự động tính toán Chuỗi ngày học dựa trên ngày hiện tại,
-    cộng dồn thời gian và tính lại Độ chính xác trung bình.
+    Hàm Backend nâng cấp: Hỗ trợ rẽ nhánh thời gian thực hành.
+    Nếu topic_type == 'conversation' -> Cộng vào ThoiGianGiaoTiep.
+    Nếu topic_type == 'alphabet'     -> Cộng vào ThoiGianHoc.
     """
     try:
+        # Khớp lệnh linh hoạt cho cả code cũ lẫn code mới
+        actual_mins = session_time_minutes if session_time_minutes is not None else time_minutes
+
         conn = get_conn()
         cursor = conn.cursor()
 
-        # 1. Lấy dữ liệu cũ của user lên
-        cursor.execute("SELECT ChuoiNgayHoc, ThoiGianHoc, DoChinhXacTB, NgayHocCuoi, TongSoLanTap FROM TaiKhoan WHERE ID = ?", (user_id,))
+        # 1. Bốc cả ThoiGianHoc lẫn ThoiGianGiaoTiep lên
+        cursor.execute("""
+            SELECT ChuoiNgayHoc, ThoiGianHoc, ISNULL(ThoiGianGiaoTiep, 0) as ThoiGianGiaoTiep, 
+                   DoChinhXacTB, NgayHocCuoi, TongSoLanTap 
+            FROM TaiKhoan WHERE ID = ?
+        """, (user_id,))
         row = cursor.fetchone()
         if not row: return None
 
         chuoi_ngay = row.ChuoiNgayHoc or 0
-        thoi_gian = row.ThoiGianHoc or 0
+        thoi_gian_alpha = row.ThoiGianHoc or 0
+        thoi_gian_gt = row.ThoiGianGiaoTiep or 0
         do_chinh_xac = row.DoChinhXacTB or 0
         tong_lan = row.TongSoLanTap or 0
         ngay_cuoi = row.NgayHocCuoi
@@ -85,37 +94,39 @@ def update_study_stats(user_id, accuracy, time_minutes):
         from datetime import date, timedelta
         today = date.today()
 
-        # 2. Thuật toán tính Chuỗi ngày học (Streak)
+        # 2. Tính chuỗi ngày học Streak
         if ngay_cuoi:
             if type(ngay_cuoi) == str:
                 from datetime import datetime
                 ngay_cuoi = datetime.strptime(ngay_cuoi, "%Y-%m-%d").date()
-                
-            if ngay_cuoi == today - timedelta(days=1):
-                chuoi_ngay += 1  # Hôm qua có học -> Tăng chuỗi
-            elif ngay_cuoi < today - timedelta(days=1):
-                chuoi_ngay = 1   # Bỏ lỡ > 1 ngày -> Mất chuỗi, đếm lại từ đầu
-            # (Nếu ngay_cuoi == today thì giữ nguyên chuỗi không tăng thêm)
-        else:
-            chuoi_ngay = 1 # Học lần đầu tiên
+            if ngay_cuoi == today - timedelta(days=1): chuoi_ngay += 1
+            elif ngay_cuoi < today - timedelta(days=1): chuoi_ngay = 1
+        else: chuoi_ngay = 1
 
-        # 3. Tính toán các chỉ số khác
         new_tong_lan = tong_lan + 1
         new_do_chinh_xac = int(((do_chinh_xac * tong_lan) + accuracy) / new_tong_lan)
-        new_thoi_gian = thoi_gian + time_minutes
 
-        # 4. Ghi đè vào Database
+        # 3. BỘ CỔNG RẼ NHÁNH THỜI GIAN
+        if topic_type == "conversation":
+            new_thoi_gt = thoi_gian_gt + actual_mins
+            new_thoi_alpha = thoi_gian_alpha
+        else:
+            new_thoi_alpha = thoi_gian_alpha + actual_mins
+            new_thoi_gt = thoi_gian_gt
+
+        # 4. Cập nhật xuống DB
         cursor.execute("""
             UPDATE TaiKhoan
-            SET ChuoiNgayHoc = ?, ThoiGianHoc = ?, DoChinhXacTB = ?, NgayHocCuoi = ?, TongSoLanTap = ?
+            SET ChuoiNgayHoc = ?, ThoiGianHoc = ?, ThoiGianGiaoTiep = ?, 
+                DoChinhXacTB = ?, NgayHocCuoi = ?, TongSoLanTap = ?
             WHERE ID = ?
-        """, (chuoi_ngay, new_thoi_gian, new_do_chinh_xac, str(today), new_tong_lan, user_id))
+        """, (chuoi_ngay, new_thoi_alpha, new_thoi_gt, new_do_chinh_xac, str(today), new_tong_lan, user_id))
         conn.commit()
 
-        # Trả về dữ liệu mới để cập nhật lên UI ngay lập tức
         return {
             "ChuoiNgayHoc": chuoi_ngay,
-            "ThoiGianHoc": new_thoi_gian,
+            "ThoiGianHoc": new_thoi_alpha,
+            "ThoiGianGiaoTiep": new_thoi_gt,
             "DoChinhXacTB": new_do_chinh_xac
         }
     except Exception as e:

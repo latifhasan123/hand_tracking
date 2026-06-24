@@ -31,6 +31,7 @@ from core.translate_window import load_lstm_model, load_lstm_model_both, predict
 from core.vietnamese_utils import apply_vietnamese_sign, LIST_DAU
 
 def create_user_menu(root):
+    current_displayed_prob = 0.0 # Biến nhớ giá trị hiển thị hiện tại
     root.title("Hand Sign Translator - Pro Edition (Dual Model)")
     window_width = 1300
     window_height = 750 # Nới rộng một chút cho thoải mái
@@ -405,15 +406,14 @@ def create_user_menu(root):
     btn_frame.grid_columnconfigure(2, weight=1, uniform="action_buttons")
 
     button_style = {
-        "height": 38,
-        "width": 70,
-        "corner_radius": 13,
+        "height": 40,
+        "corner_radius": 12,
         "font": ctk.CTkFont(size=12, weight="bold"),
     }
 
     ctk.CTkButton(
         btn_frame,
-        text="⌫ Xóa",
+        text="Xóa",
         fg_color=COLORS["orange"],
         hover_color="#E99A00",
         text_color="#111827",
@@ -423,7 +423,7 @@ def create_user_menu(root):
 
     ctk.CTkButton(
         btn_frame,
-        text="📋 Copy",
+        text="Copy",
         fg_color=COLORS["blue"],
         hover_color="#1473CC",
         text_color="white",
@@ -433,13 +433,14 @@ def create_user_menu(root):
 
     ctk.CTkButton(
         btn_frame,
-        text="🗑 Xóa hết",
+        text="Xóa hết",
         fg_color=COLORS["red"],
         hover_color="#D73745",
         text_color="white",
         command=action_clear_all,
         **button_style
     ).grid(row=0, column=2, sticky="ew", padx=(4, 0))
+    
 
     # ==========================================
     # CỘT 2: CAMERA Ở GIỮA
@@ -780,7 +781,18 @@ def create_user_menu(root):
                     hover_text = visual_text if raw_text != "KHONG_XAC_DINH" else "Chưa rõ"
                     
                     # Cập nhật thanh tiến độ màu sắc
-                    progress_bar.set(prob)
+                    def animate_progress(target_prob):
+                        nonlocal current_displayed_prob
+                        step = 0.05 # Tốc độ trượt (có thể chỉnh 0.02 - 0.1)
+                        if abs(current_displayed_prob - target_prob) > 0.01:
+                            if current_displayed_prob < target_prob:
+                                current_displayed_prob += step
+                            else:
+                                current_displayed_prob -= step
+                            progress_bar.set(current_displayed_prob)
+
+                    # Thay cho dòng progress_bar.set(prob) cũ:
+                    animate_progress(prob)
                     if prob < 0.5:
                         progress_bar.configure(progress_color="#F44336")
                         color_code = "#F44336"
@@ -797,7 +809,17 @@ def create_user_menu(root):
                         status_text = f"Đã xác nhận: {hover_text} ({accuracy_pct}%)"
                         display_text = raw_text  
                             
-                    result_label.configure(text=visual_text if display_text != "..." else "...")
+                    # Thay font cố định thành font linh hoạt
+                    def update_result_font(text):
+                        length = len(text)
+                        if length > 8: font_size = 35 # Co chữ lại nếu chuỗi quá dài
+                        elif length > 4: font_size = 45
+                        else: font_size = 60
+                        result_label.configure(font=ctk.CTkFont(size=font_size, weight="bold"))
+                        result_label.configure(text=text)
+
+                    # Trong luồng cập nhật UI (chỗ gán kết quả):
+                    update_result_font(visual_text if display_text != "..." else "...")
                     accuracy_label.configure(text=status_text, text_color=color_code)
                     
                     # LOGIC GÕ VĂN BẢN
