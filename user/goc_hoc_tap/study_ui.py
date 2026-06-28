@@ -2021,6 +2021,9 @@ class StudyApp(ctk.CTkFrame):
         # ==========================================
         # VỊ TRÍ 2: TỰ ĐỘNG BUNG KHÓA QUÉT 2 TAY CHO GIAO TIẾP
         # ==========================================
+        # ==========================================
+        # VỊ TRÍ 1: SỬA HÀM NẠP AI (THÊM RETURN TRUE)
+        # ==========================================
         def load_ai_dependencies():
             import sys, os
             root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -2044,6 +2047,9 @@ class StudyApp(ctk.CTkFrame):
                     self.lstm_model_2, self.action_labels_2 = load_lstm_model_both()
             except Exception as e:
                 print("[AI Study] Lỗi nạp siêu não LSTM:", e)
+                return False # Báo lỗi nếu nạp hỏng
+                
+            return True # <--- BÍ KÍP LÀ ĐÂY: Báo cáo đã nạp AI thành công!
 
         def hand_vectorlize(landmarks, hand_type, prev_wx, prev_wy):
             import numpy as np
@@ -2217,9 +2223,6 @@ class StudyApp(ctk.CTkFrame):
                                             self.cached_target_confidence = prob
                                         else:
                                             self.cached_target_confidence = 0.0 if prob > 0.5 else self.cached_target_confidence
-                        else:
-                            self.seq_1_hand.clear(); self.seq_2_hands.clear()
-                            self.prev_wx_l = self.prev_wy_l = self.prev_wx_r = self.prev_wy_r = None
 
                     # --- XUẤT KẾT QUẢ TỪ CACHE RA GIAO DIỆN ---
                     predicted_char = self.cached_predicted_char
@@ -2276,32 +2279,71 @@ class StudyApp(ctk.CTkFrame):
             if self.practice_camera_on: self.practice_after_id = self.after(15, update_practice_frame)
 
         def start_practice_camera():
-            import cv2, time
-            if self.practice_cap: self.practice_cap.release()
-            load_ai_dependencies(); setup_current_target_ui()
-            self.practice_start_time = time.time()
+            import cv2, time, threading
+            import os
             
-            # Khởi tạo 2 luồng bám đuổi vector độc lập cho 1 tay và 2 tay
-            self.seq_1_hand = []
-            self.seq_2_hands = []
-            self.prev_wx_l = self.prev_wy_l = None
-            self.prev_wx_r = self.prev_wy_r = None
-            
-            self.practice_frame_counter = 0
-            self.cached_predicted_char = ""
-            self.cached_target_confidence = 0.0
+            if self.practice_cap: 
+                self.practice_cap.release()
+                
+            # 1. Đổi trạng thái UI ngay lập tức để người dùng không bấm nhiều lần
+            toggle_btn.configure(text="⏳ Đang mở...", state="disabled", fg_color=T.MUTED)
+            self.practice_status_label.configure(text="● Đang khởi động AI & Camera...", text_color=T.ORANGE)
 
-            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(0)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            cap.set(cv2.CAP_PROP_FPS, 30)
-            
-            if not cap.isOpened(): return
-            self.practice_cap = cap; self.practice_camera_on = True
-            self.practice_status_label.configure(text="● Camera đang bật", text_color=T.GREEN)
-            toggle_btn.configure(text="■ Tắt Camera", fg_color=T.RED)
-            update_practice_frame()
+            # 2. Tách các tác vụ nặng (Nạp AI + Bật Cam) sang luồng phụ để chống đơ UI
+            def init_task():
+                load_ai_dependencies()
+                import cv2
+                
+                # THUẬT TOÁN TỰ ĐỘNG DÒ TÌM CAMERA (AUTO-FALLBACK)
+                cap = None
+                for cam_idx in [0, 1, 2]: # Quét các cổng camera 0, 1, 2
+                    cap = cv2.VideoCapture(cam_idx) # Thử mở chuẩn cơ bản trước
+                    if cap is not None and cap.isOpened(): 
+                        break
+                    
+                    if os.name == "nt": # Nếu thất bại, thử dùng DirectShow trên Windows
+                        cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
+                        if cap is not None and cap.isOpened(): 
+                            break
+
+                if cap is not None and cap.isOpened():
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    cap.set(cv2.CAP_PROP_FPS, 30)
+                
+                # Gọi lại luồng chính (UI Thread) để cập nhật giao diện sau khi xong
+                self.after(0, finish_init, cap, time.time())
+
+            # 3. Hàm hoàn tất, khởi tạo các biến và chạy khung hình
+            def finish_init(cap, start_t):
+                if not cap.isOpened(): 
+                    self.practice_status_label.configure(text="● Lỗi mở camera", text_color=T.RED)
+                    toggle_btn.configure(text="▶ Bật Camera", state="normal", fg_color=T.BLUE)
+                    return
+                
+                setup_current_target_ui()
+                self.practice_start_time = start_t
+                
+                # Khởi tạo 2 luồng bám đuổi vector độc lập cho 1 tay và 2 tay
+                self.seq_1_hand = []
+                self.seq_2_hands = []
+                self.prev_wx_l = self.prev_wy_l = None
+                self.prev_wx_r = self.prev_wy_r = None
+                
+                self.practice_frame_counter = 0
+                self.cached_predicted_char = ""
+                self.cached_target_confidence = 0.0
+
+                self.practice_cap = cap
+                self.practice_camera_on = True
+                
+                self.practice_status_label.configure(text="● Camera đang bật", text_color=T.GREEN)
+                toggle_btn.configure(text="■ Tắt Camera", state="normal", fg_color=T.RED)
+                update_practice_frame()
+
+            # Chạy luồng phụ
+            threading.Thread(target=init_task, daemon=True).start()
 
         def stop_from_button():
             safe_stop()
@@ -2980,17 +3022,18 @@ class StudyApp(ctk.CTkFrame):
         btn = ctk.CTkButton(card, text="▶ Ôn lại", font=ctk.CTkFont(weight="bold"), height=38, fg_color=T.PANEL, border_width=1, border_color=T.BORDER, hover_color=T.CARD_HOVER, text_color=T.BLUE, command=lambda: self.show_camera_practice(letter, back_cmd=self.show_recent_words))
         btn.pack(fill="x", padx=16, pady=(12, 16))
     def show_reaction_training(self):
-        """Luyện phản xạ: app ra ký hiệu ngẫu nhiên, người học phải làm nhanh trước camera."""
+        """Luyện phản xạ: Đập đi xây lại - Đồng bộ, Ổn định và An toàn tuyệt đối."""
         import os
         import random
         import sys
         import time
         from tkinter import messagebox
+        import customtkinter as ctk
 
         sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
         self.refresh_account_button()
 
-        # ---------- 1) NẠP DỮ LIỆU THẬT TỪ TÀI KHOẢN + DATA BÀI HỌC ----------
+        # ---------- 1) NẠP DỮ LIỆU TÀI KHOẢN ----------
         auth_module = None
         for name, module in list(sys.modules.items()):
             if name == "auth_ui" or name.endswith(".auth_ui"):
@@ -3007,35 +3050,18 @@ class StudyApp(ctk.CTkFrame):
         is_logged_in = bool(auth_module and getattr(auth_module, "CURRENT_USER", None))
         learned = list(getattr(auth_module, "LEARNED_LETTERS", []) or []) if auth_module else []
 
+        # Chuẩn bị kho dữ liệu (Pool)
         all_signs = []
         for item in ALPHABET or []:
-            if isinstance(item, dict):
-                val = item.get("label") or item.get("NhanHienThi") or item.get("title") or item.get("TieuDe")
-            else:
-                val = item
-
+            val = item.get("label") or item.get("title") if isinstance(item, dict) else item
             val = str(val or "").replace("Chữ ", "", 1).strip().upper()
-
-            # Không đưa các mã dấu riêng DAU_ vào luyện phản xạ chính.
-            # Chữ có dấu như Ă, Â, Ê, Ô, Ơ, Ư vẫn được giữ.
             if val and val not in all_signs and not val.startswith("DAU_"):
                 all_signs.append(val)
 
         if not all_signs:
-            all_signs = [
-                "A", "B", "C", "D", "Đ", "E", "G", "H", "I", "K", "L", "M",
-                "N", "O", "P", "Q", "R", "S", "T", "U", "V", "X", "Y"
-            ]
+            all_signs = ["A", "B", "C", "D", "Đ", "E", "G", "H", "I", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "X", "Y"]
 
-        clean_learned = []
-        for val in learned:
-            val = str(val or "").replace("Chữ ", "", 1).strip().upper()
-            if val and val not in clean_learned:
-                clean_learned.append(val)
-                if val not in all_signs:
-                    all_signs.append(val)
-
-        # Ưu tiên ký hiệu đã học. Nếu chưa có thì dùng toàn bộ dữ liệu bảng chữ cái.
+        clean_learned = [str(v or "").replace("Chữ ", "", 1).strip().upper() for v in learned if not str(v).startswith("DAU_")]
         pool = clean_learned[:] if clean_learned else all_signs[:]
         random.shuffle(pool)
 
@@ -3050,7 +3076,7 @@ class StudyApp(ctk.CTkFrame):
             messagebox.showinfo("Luyện phản xạ", "Chưa có dữ liệu ký hiệu để luyện tập.")
             return
 
-        # ---------- 2) TRẠNG THÁI PHIÊN LUYỆN ----------
+        # ---------- 2) KHAI BÁO BIẾN TRẠNG THÁI ----------
         self.reaction_targets = targets
         self.reaction_results = []
         self.reaction_index = 0
@@ -3061,15 +3087,16 @@ class StudyApp(ctk.CTkFrame):
         self.reaction_success_frames = 0
         self.reaction_best_confidence = 0.0
 
-
         self.sequence_data = []
-        self.prev_wx = None
-        self.prev_wy = None
-        self.ai_session = None
-        self.ai_labels = None
-        self.mp_hands = None
-        self.mp_draw = None
+        self.seq_1_hand = []
+        self.seq_2_hands = []
+        self.prev_wx_l = self.prev_wy_l = self.prev_wx_r = self.prev_wy_r = None
+        
+        self.practice_frame_counter = 0
+        self.cached_predicted_char = ""
+        self.cached_target_confidence = 0.0
 
+        # ---------- 3) DỰNG GIAO DIỆN (UI) ----------
         page = self._clear_page()
         page.grid_columnconfigure(0, weight=1)
         page.grid_rowconfigure(0, weight=1)
@@ -3079,56 +3106,33 @@ class StudyApp(ctk.CTkFrame):
 
         header = ctk.CTkFrame(wrapper, fg_color="transparent")
         header.pack(fill="x", pady=(0, 18))
-
         title_box = ctk.CTkFrame(header, fg_color="transparent")
         title_box.pack(side="left")
 
-        self._title(
-            title_box,
-            "LUYỆN PHẢN XẠ",
-            f"Thực hiện nhanh {len(targets)} ký hiệu trước camera"
-        )
+        self._title(title_box, "LUYỆN PHẢN XẠ", f"Thực hiện nhanh {len(targets)} ký hiệu trước camera")
 
         def safe_stop():
             self.practice_camera_on = False
-
-            if self.practice_after_id is not None:
-                try:
-                    self.after_cancel(self.practice_after_id)
-                except Exception:
-                    pass
+            if hasattr(self, 'practice_after_id') and self.practice_after_id:
+                try: self.after_cancel(self.practice_after_id)
+                except Exception: pass
                 self.practice_after_id = None
-
-            if self.practice_cap is not None:
-                try:
-                    self.practice_cap.release()
-                except Exception:
-                    pass
+            if hasattr(self, 'practice_cap') and self.practice_cap:
+                try: self.practice_cap.release()
+                except Exception: pass
                 self.practice_cap = None
 
         def go_back():
             safe_stop()
             self.show_review()
 
-        self.back_button(header, command=go_back, text="←  Trở về").pack(
-            side="right",
-            anchor="n",
-            pady=6
-        )
-
-        
+        self.back_button(header, command=go_back, text="←  Trở về").pack(side="right", anchor="n", pady=6)
 
         body = ctk.CTkFrame(wrapper, fg_color="transparent")
         body.pack(fill="both", expand=True)
 
-        # ---------- CỘT TRÁI: CAMERA ----------
-        left_frame = ctk.CTkFrame(
-            body,
-            fg_color=T.PANEL,
-            corner_radius=16,
-            border_width=1,
-            border_color=T.BORDER
-        )
+        # -- KHU VỰC CAMERA --
+        left_frame = ctk.CTkFrame(body, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
         left_frame.pack(side="left", fill="both", expand=True)
         left_frame.grid_rowconfigure(1, weight=1)
         left_frame.grid_columnconfigure(0, weight=1)
@@ -3136,999 +3140,414 @@ class StudyApp(ctk.CTkFrame):
         cam_bar = ctk.CTkFrame(left_frame, fg_color="transparent")
         cam_bar.grid(row=0, column=0, sticky="ew", padx=20, pady=15)
 
-        self.practice_status_label = ctk.CTkLabel(
-            cam_bar,
-            text="● Camera đang tắt",
-            fg_color="#2A2F35",
-            corner_radius=8,
-            text_color=T.MUTED,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            padx=12,
-            pady=6,
-        )
+        self.practice_status_label = ctk.CTkLabel(cam_bar, text="● Camera đang tắt", fg_color="#2A2F35", corner_radius=8, text_color=T.MUTED, font=ctk.CTkFont(size=13, weight="bold"), padx=12, pady=6)
         self.practice_status_label.pack(side="left")
 
-        reaction_hint_label = ctk.CTkLabel(
-            cam_bar,
-            text="Mẹo: đưa tay vào khung, làm đúng và giữ ổn định thật nhanh.",
-            text_color=T.MUTED,
-            font=ctk.CTkFont(size=13),
-        )
-        reaction_hint_label.pack(side="right")
+        ctk.CTkLabel(cam_bar, text="Mẹo: đưa tay vào khung, làm đúng và giữ ổn định thật nhanh.", text_color=T.MUTED, font=ctk.CTkFont(size=13)).pack(side="right")
 
-        # ==========================================
-        # BÍ KÍP 1: KHÓA CỨNG KÍCH THƯỚC KHUNG CAMERA PHẢN XẠ
-        # ==========================================
-        REACTION_CAMERA_W = 720
-        REACTION_CAMERA_H = 430
-
-        camera_view = ctk.CTkFrame(
-            left_frame,
-            width=REACTION_CAMERA_W,
-            height=REACTION_CAMERA_H,
-            fg_color="#080C11",
-            corner_radius=12
-        )
+        camera_view = ctk.CTkFrame(left_frame, width=720, height=430, fg_color="#080C11", corner_radius=12)
         camera_view.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
         camera_view.grid_propagate(False)
+        camera_view.grid_rowconfigure(0, weight=1); camera_view.grid_columnconfigure(0, weight=1)
 
-        camera_view.grid_rowconfigure(0, weight=1)
-        camera_view.grid_columnconfigure(0, weight=1)
-
-        self.practice_video_label = ctk.CTkLabel(
-            camera_view,
-            text="⚡\n\nNhấn 'Bắt đầu phản xạ' để mở camera",
-            font=ctk.CTkFont(size=22, weight="bold"),
-            text_color=T.MUTED_2,
-        )
+        self.practice_video_label = ctk.CTkLabel(camera_view, text="⚡\n\nNhấn 'Bắt đầu phản xạ' để mở camera", font=ctk.CTkFont(size=22, weight="bold"), text_color=T.MUTED_2)
         self.practice_video_label.grid(row=0, column=0, sticky="nsew")
 
-        # ---------- CỘT PHẢI: THỬ THÁCH ----------
+        # -- KHU VỰC THỬ THÁCH (BÊN PHẢI) --
         right_frame = ctk.CTkFrame(body, fg_color="transparent", width=430)
         right_frame.pack(side="right", fill="y", padx=(25, 0))
         right_frame.pack_propagate(False)
 
-        target_panel = ctk.CTkFrame(
-            right_frame,
-            fg_color=T.PANEL,
-            corner_radius=16,
-            border_width=1,
-            border_color=T.BORDER
-        )
+        target_panel = ctk.CTkFrame(right_frame, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
         target_panel.pack(fill="x", pady=(0, 15))
 
         top_row = ctk.CTkFrame(target_panel, fg_color="transparent")
         top_row.pack(fill="x", padx=20, pady=(18, 8))
 
-        self.reaction_question_label = ctk.CTkLabel(
-            top_row,
-            text=f"0 / {len(targets)}",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=T.MUTED,
-        )
+        self.reaction_question_label = ctk.CTkLabel(top_row, text=f"0 / {len(targets)}", font=ctk.CTkFont(size=14, weight="bold"), text_color=T.MUTED)
         self.reaction_question_label.pack(side="left")
 
-        self.reaction_score_label = ctk.CTkLabel(
-            top_row,
-            text="Đúng: 0",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=T.GREEN,
-        )
+        self.reaction_score_label = ctk.CTkLabel(top_row, text="Đúng: 0", font=ctk.CTkFont(size=14, weight="bold"), text_color=T.GREEN)
         self.reaction_score_label.pack(side="right")
 
-        ctk.CTkLabel(
-            target_panel,
-            text="Ký hiệu cần làm",
-            font=ctk.CTkFont(size=14),
-            text_color=T.MUTED,
-        ).pack(pady=(4, 2))
-
-        self.reaction_target_label = ctk.CTkLabel(
-            target_panel,
-            text="Sẵn sàng",
-            font=ctk.CTkFont(size=28, weight="bold"),
-            text_color=T.MUTED,
-        )
+        ctk.CTkLabel(target_panel, text="Ký hiệu cần làm", font=ctk.CTkFont(size=14), text_color=T.MUTED).pack(pady=(4, 2))
+        self.reaction_target_label = ctk.CTkLabel(target_panel, text="Sẵn sàng", font=ctk.CTkFont(size=28, weight="bold"), text_color=T.MUTED)
         self.reaction_target_label.pack(pady=(0, 10))
 
         self.reaction_img_box = ctk.CTkFrame(target_panel, fg_color="transparent")
         self.reaction_img_box.pack(fill="x", padx=20, pady=(0, 15))
-        ctk.CTkLabel(
-            self.reaction_img_box,
-            text="⚡\nChờ bắt đầu",
-            height=130,
-            fg_color="#0E1722",
-            corner_radius=14,
-            font=ctk.CTkFont(size=18, weight="bold"),
-            text_color=T.MUTED,
-        ).pack(fill="x")
-        self.reaction_timer_label = ctk.CTkLabel(
-            target_panel,
-            text="--",
-            font=ctk.CTkFont(size=22, weight="bold"),
-            text_color=T.MUTED,
-        )
+        ctk.CTkLabel(self.reaction_img_box, text="⚡\nChờ bắt đầu", height=130, fg_color="#0E1722", corner_radius=14, font=ctk.CTkFont(size=18, weight="bold"), text_color=T.MUTED).pack(fill="x")
+
+        self.reaction_timer_label = ctk.CTkLabel(target_panel, text="--", font=ctk.CTkFont(size=22, weight="bold"), text_color=T.MUTED)
         self.reaction_timer_label.pack(pady=(0, 8))
 
-        self.reaction_timer_bar = ctk.CTkProgressBar(
-            target_panel,
-            height=9,
-            progress_color=T.BLUE,
-            fg_color="#2A3038"
-        )
+        self.reaction_timer_bar = ctk.CTkProgressBar(target_panel, height=9, progress_color=T.BLUE, fg_color="#2A3038")
         self.reaction_timer_bar.pack(fill="x", padx=20, pady=(0, 20))
         self.reaction_timer_bar.set(0)
 
-        feedback_panel = ctk.CTkFrame(
-            right_frame,
-            fg_color=T.PANEL,
-            corner_radius=16,
-            border_width=1,
-            border_color=T.BORDER
-        )
+        feedback_panel = ctk.CTkFrame(right_frame, fg_color=T.PANEL, corner_radius=16, border_width=1, border_color=T.BORDER)
         feedback_panel.pack(fill="x", pady=(0, 15))
 
         row_pred = ctk.CTkFrame(feedback_panel, fg_color="transparent")
         row_pred.pack(fill="x", padx=20, pady=(18, 6))
-
-        ctk.CTkLabel(
-            row_pred,
-            text="Bạn đang làm:",
-            font=ctk.CTkFont(size=15, weight="bold"),
-            text_color=T.TEXT
-        ).pack(side="left")
-
-        self.reaction_pred_label = ctk.CTkLabel(
-            row_pred,
-            text="--",
-            font=ctk.CTkFont(size=20, weight="bold"),
-            text_color=T.TEXT
-        )
+        ctk.CTkLabel(row_pred, text="Bạn đang làm:", font=ctk.CTkFont(size=15, weight="bold"), text_color=T.TEXT).pack(side="left")
+        self.reaction_pred_label = ctk.CTkLabel(row_pred, text="--", font=ctk.CTkFont(size=20, weight="bold"), text_color=T.TEXT)
         self.reaction_pred_label.pack(side="right")
 
         row_conf = ctk.CTkFrame(feedback_panel, fg_color="transparent")
         row_conf.pack(fill="x", padx=20, pady=(4, 8))
-
-        ctk.CTkLabel(
-            row_conf,
-            text="Độ khớp:",
-            font=ctk.CTkFont(size=15, weight="bold"),
-            text_color=T.TEXT
-        ).pack(side="left")
-
-        self.reaction_conf_label = ctk.CTkLabel(
-            row_conf,
-            text="0%",
-            font=ctk.CTkFont(size=20, weight="bold"),
-            text_color=T.BLUE
-        )
+        ctk.CTkLabel(row_conf, text="Độ khớp:", font=ctk.CTkFont(size=15, weight="bold"), text_color=T.TEXT).pack(side="left")
+        self.reaction_conf_label = ctk.CTkLabel(row_conf, text="0%", font=ctk.CTkFont(size=20, weight="bold"), text_color=T.BLUE)
         self.reaction_conf_label.pack(side="right")
 
-        self.reaction_conf_bar = ctk.CTkProgressBar(
-            feedback_panel,
-            height=8,
-            progress_color=T.BLUE,
-            fg_color="#2A3038"
-        )
+        self.reaction_conf_bar = ctk.CTkProgressBar(feedback_panel, height=8, progress_color=T.BLUE, fg_color="#2A3038")
         self.reaction_conf_bar.pack(fill="x", padx=20, pady=(0, 14))
         self.reaction_conf_bar.set(0)
 
-        self.reaction_feedback_label = ctk.CTkLabel(
-            feedback_panel,
-            text="☆ Sẵn sàng chưa? Nhấn bắt đầu để luyện phản xạ.",
-            fg_color="#2A2F35",
-            corner_radius=8,
-            height=45,
-            text_color=T.MUTED,
-            font=ctk.CTkFont(size=13),
-            wraplength=350,
-        )
+        self.reaction_feedback_label = ctk.CTkLabel(feedback_panel, text="☆ Sẵn sàng chưa? Nhấn bắt đầu để luyện phản xạ.", fg_color="#2A2F35", corner_radius=8, height=45, text_color=T.MUTED, font=ctk.CTkFont(size=13), wraplength=350)
         self.reaction_feedback_label.pack(fill="x", padx=20, pady=(0, 18))
-        # ==========================
-        # THANH ĐIỀU KHIỂN - ĐƯA XUỐNG DƯỚI CÙNG
-        # ==========================
-        control_bar = ctk.CTkFrame(
-            wrapper,
-            fg_color=T.PANEL,
-            corner_radius=18,
-            border_width=1,
-            border_color=T.BORDER
-        )
+
+        control_bar = ctk.CTkFrame(wrapper, fg_color=T.PANEL, corner_radius=18, border_width=1, border_color=T.BORDER)
         control_bar.pack(side="bottom", fill="x", pady=(18, 0))
-        control_bar.grid_columnconfigure(0, weight=1)
-        control_bar.grid_columnconfigure(1, weight=0)
+        control_bar.grid_columnconfigure(0, weight=1); control_bar.grid_columnconfigure(1, weight=0)
 
         control_left = ctk.CTkFrame(control_bar, fg_color="transparent")
         control_left.grid(row=0, column=0, sticky="ew", padx=22, pady=16)
+        ctk.CTkLabel(control_left, text="⚡  Sẵn sàng luyện phản xạ?", font=ctk.CTkFont(size=18, weight="bold"), text_color=T.TEXT).pack(anchor="w")
+        ctk.CTkLabel(control_left, text="Bấm bắt đầu → đếm ngược 3 giây → hiện ký hiệu bất ngờ. Cần làm đúng trước khi hết 4 giây.", font=ctk.CTkFont(size=13), text_color=T.MUTED, wraplength=760, justify="left").pack(anchor="w", pady=(5, 0))
 
-        ctk.CTkLabel(
-            control_left,
-            text="⚡  Sẵn sàng luyện phản xạ?",
-            font=ctk.CTkFont(size=18, weight="bold"),
-            text_color=T.TEXT
-        ).pack(anchor="w")
-
-        ctk.CTkLabel(
-            control_left,
-            text=(
-                "Bấm bắt đầu → hệ thống đếm ngược 3 giây → hiện ký hiệu bất ngờ. "
-                "Bạn cần làm đúng trước khi hết 4 giây."
-            ),
-            font=ctk.CTkFont(size=13),
-            text_color=T.MUTED,
-            wraplength=760,
-            justify="left"
-        ).pack(anchor="w", pady=(5, 0))
-
-        mini_stats = ctk.CTkFrame(control_left, fg_color="transparent")
-        mini_stats.pack(anchor="w", pady=(12, 0))
-
-        for text, color in [
-            (f"{len(targets)} lượt", T.BLUE),
-            ("4 giây / lượt", T.ORANGE),
-            ("Tính vào độ chính xác TB", T.GREEN if is_logged_in else T.MUTED),
-        ]:
-            ctk.CTkLabel(
-                mini_stats,
-                text=text,
-                fg_color="#132033",
-                corner_radius=8,
-                text_color=color,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                padx=10,
-                pady=5
-            ).pack(side="left", padx=(0, 8))
-
-        start_btn = ctk.CTkButton(
-            control_bar,
-            text="▶  Bắt đầu phản xạ",
-            width=230,
-            height=58,
-            fg_color=T.ORANGE,
-            hover_color="#D98200",
-            font=ctk.CTkFont(size=18, weight="bold"),
-            corner_radius=16,
-        )
+        start_btn = ctk.CTkButton(control_bar, text="▶  Bắt đầu phản xạ", width=230, height=58, fg_color=T.ORANGE, hover_color="#D98200", font=ctk.CTkFont(size=18, weight="bold"), corner_radius=16)
         start_btn.grid(row=0, column=1, sticky="e", padx=22, pady=16)
 
+        # ---------- 4) CÁC HÀM CẬP NHẬT UI TRUNG GIAN ----------
+        def set_waiting_target_ui(message="Chờ bắt đầu"):
+            for child in self.reaction_img_box.winfo_children(): child.destroy()
+            ctk.CTkLabel(self.reaction_img_box, text=f"⚡\n{message}", height=105, fg_color="#0E1722", corner_radius=14, font=ctk.CTkFont(size=18, weight="bold"), text_color=T.MUTED).pack(fill="x")
+            self.reaction_target_label.configure(text="Sẵn sàng", text_color=T.MUTED)
+            self.reaction_timer_label.configure(text="--", text_color=T.MUTED)
+            self.reaction_timer_bar.configure(progress_color=T.BLUE); self.reaction_timer_bar.set(0)
+            self.reaction_pred_label.configure(text="--", text_color=T.TEXT)
+            self.reaction_conf_label.configure(text="0%", text_color=T.BLUE)
+            self.reaction_conf_bar.configure(progress_color=T.BLUE); self.reaction_conf_bar.set(0)
+
+        def reset_ui_to_idle():
+            safe_stop()
+            start_btn.configure(text="▶  Bắt đầu phản xạ", state="normal", fg_color=T.ORANGE, hover_color="#D98200")
+            self.practice_status_label.configure(text="● Camera đang tắt", text_color=T.MUTED, fg_color="#2A2F35")
+            set_waiting_target_ui("Chờ bắt đầu")
+
+        def stop_reaction_training():
+            reset_ui_to_idle()
+            self.reaction_round_started = False
+            self.reaction_results.clear()
+            self.reaction_index = 0
+            from PIL import Image
+            blank_img = Image.new('RGB', (10, 10), (8, 12, 17))
+            blank_ctk = ctk.CTkImage(light_image=blank_img, dark_image=blank_img, size=(10, 10))
+            self.practice_video_label.configure(image=blank_ctk, text="⚡\n\nNhấn 'Bắt đầu phản xạ' để mở camera")
+            self.practice_video_label.image = blank_ctk
+
         def render_target_preview():
-            for child in self.reaction_img_box.winfo_children():
-                child.destroy()
-
+            for child in self.reaction_img_box.winfo_children(): child.destroy()
             target = self.reaction_targets[self.reaction_index]
-
-            composite_map = {
-                "Ă": "DAU_A",
-                "Â": "DAU_MU",
-                "Ê": "DAU_MU",
-                "Ô": "DAU_MU",
-                "Ơ": "DAU_MOC",
-                "Ư": "DAU_MOC",
-            }
+            composite_map = {"Ă": "DAU_A", "Â": "DAU_MU", "Ê": "DAU_MU", "Ô": "DAU_MU", "Ơ": "DAU_MOC", "Ư": "DAU_MOC"}
 
             if target in composite_map:
                 row = ctk.CTkFrame(self.reaction_img_box, fg_color="transparent")
                 row.pack(anchor="center")
-
-                base = self.create_lesson_image_label(
-                    row,
-                    self.get_lesson(target),
-                    size=(95, 95),
-                    height=105,
-                    fallback_font_size=52
-                )
-                base.configure(fg_color="#0E1722", corner_radius=12)
-                base.pack(side="left", padx=6)
-
-                mark = self.create_lesson_image_label(
-                    row,
-                    {"label": composite_map[target]},
-                    size=(95, 95),
-                    height=105,
-                    fallback_font_size=52
-                )
-                mark.configure(fg_color="#0E1722", corner_radius=12)
-                mark.pack(side="left", padx=6)
+                base = self.create_lesson_image_label(row, self.get_lesson(target), size=(95, 95), height=105, fallback_font_size=52)
+                base.configure(fg_color="#0E1722", corner_radius=12); base.pack(side="left", padx=6)
+                mark = self.create_lesson_image_label(row, {"label": composite_map[target]}, size=(95, 95), height=105, fallback_font_size=52)
+                mark.configure(fg_color="#0E1722", corner_radius=12); mark.pack(side="left", padx=6)
             else:
-                img = self.create_lesson_image_label(
-                    self.reaction_img_box,
-                    self.get_lesson(target),
-                    size=(95, 95),
-                    height=130,
-                    fallback_font_size=70
-                )
-                img.configure(fg_color="#0E1722", corner_radius=14)
-                img.pack(fill="x")
-        def set_waiting_target_ui(message="Chờ bắt đầu"):
-            for child in self.reaction_img_box.winfo_children():
-                child.destroy()
-
-            ctk.CTkLabel(
-                self.reaction_img_box,
-                text=f"⚡\n{message}",
-                height=105,
-                fg_color="#0E1722",
-                corner_radius=14,
-                font=ctk.CTkFont(size=18, weight="bold"),
-                text_color=T.MUTED,
-            ).pack(fill="x")
-
-            self.reaction_target_label.configure(
-                text="Sẵn sàng",
-                text_color=T.MUTED
-            )
-
-            self.reaction_timer_label.configure(
-                text="--",
-                text_color=T.MUTED
-            )
-
-            self.reaction_timer_bar.configure(progress_color=T.BLUE)
-            self.reaction_timer_bar.set(0)
-
-            self.reaction_pred_label.configure(
-                text="--",
-                text_color=T.TEXT
-            )
-
-            self.reaction_conf_label.configure(
-                text="0%",
-                text_color=T.BLUE
-            )
-
-            self.reaction_conf_bar.configure(progress_color=T.BLUE)
-            self.reaction_conf_bar.set(0)
-
+                img = self.create_lesson_image_label(self.reaction_img_box, self.get_lesson(target), size=(95, 95), height=130, fallback_font_size=70)
+                img.configure(fg_color="#0E1722", corner_radius=14); img.pack(fill="x")
 
         def begin_start_countdown(number=3):
-            if not self.practice_camera_on:
-                return
-
+            if not self.practice_camera_on: return
             if number <= 0:
                 start_round()
                 return
-
-            for child in self.reaction_img_box.winfo_children():
-                child.destroy()
-
-            ctk.CTkLabel(
-                self.reaction_img_box,
-                text=str(number),
-                height=105,
-                fg_color="#0E1722",
-                corner_radius=14,
-                font=ctk.CTkFont(size=60, weight="bold"),
-                text_color=T.ORANGE,
-            ).pack(fill="x")
-
-            self.reaction_target_label.configure(
-                text="Chuẩn bị",
-                text_color=T.ORANGE
-            )
-
-            self.reaction_timer_label.configure(
-                text=str(number),
-                text_color=T.ORANGE
-            )
-
-            self.reaction_timer_bar.configure(progress_color=T.ORANGE)
-            self.reaction_timer_bar.set(number / 3)
-
-            self.reaction_feedback_label.configure(
-                text="☆ Chuẩn bị nhìn ký hiệu và làm thật nhanh!",
-                fg_color="#332200",
-                text_color=T.ORANGE
-            )
-
+            for child in self.reaction_img_box.winfo_children(): child.destroy()
+            ctk.CTkLabel(self.reaction_img_box, text=str(number), height=105, fg_color="#0E1722", corner_radius=14, font=ctk.CTkFont(size=60, weight="bold"), text_color=T.ORANGE).pack(fill="x")
+            self.reaction_target_label.configure(text="Chuẩn bị", text_color=T.ORANGE)
+            self.reaction_timer_label.configure(text=str(number), text_color=T.ORANGE)
+            self.reaction_timer_bar.configure(progress_color=T.ORANGE); self.reaction_timer_bar.set(number / 3)
+            self.reaction_feedback_label.configure(text="☆ Chuẩn bị nhìn ký hiệu và làm thật nhanh!", fg_color="#332200", text_color=T.ORANGE)
             self.after(1000, lambda: begin_start_countdown(number - 1))
-        def add_history_row(target, ok, reaction_time, confidence):
-            return
 
-        def update_header_stats():
-            correct = sum(1 for r in self.reaction_results if r["correct"])
-            self.reaction_score_label.configure(text=f"Đúng: {correct}")
-
-            current_no = min(self.reaction_index + 1, len(self.reaction_targets))
-            self.reaction_question_label.configure(
-                text=f"Câu {current_no} / {len(self.reaction_targets)}"
-            )
-
-        def show_result_page():
-            safe_stop()
-
-            total = len(self.reaction_results) or len(self.reaction_targets)
-            correct = sum(1 for r in self.reaction_results if r["correct"])
-            accuracy = int((correct / total) * 100) if total else 0
-
-            correct_times = [
-                r["reaction_time"]
-                for r in self.reaction_results
-                if r["correct"] and r["reaction_time"] is not None
-            ]
-            avg_time = sum(correct_times) / len(correct_times) if correct_times else 0
-            session_minutes = max(1, int((time.time() - self.reaction_session_start) / 60))
-
-            # Lưu vào dữ liệu thật:
-            # Độ chính xác TB chỉ lấy đúng/sai, không trộn tốc độ phản xạ.
-            try:
-                import user_db
-
-                if is_logged_in and auth_module and getattr(auth_module, "CURRENT_USER", None):
-                    updated = user_db.update_study_stats(
-                        auth_module.CURRENT_USER["id"],
-                        accuracy,
-                        session_time_minutes=session_minutes,
-                    )
-                    if updated:
-                        auth_module.CURRENT_USER.update(updated)
-            except Exception as e:
-                print("[Luyện phản xạ] Không lưu được thống kê:", e)
-
-            result_page = self._clear_page()
-            result_page.grid_columnconfigure(0, weight=1)
-            result_page.grid_rowconfigure(0, weight=1)
-
-            card = ctk.CTkFrame(
-                result_page,
-                fg_color=T.PANEL,
-                corner_radius=20,
-                border_width=1,
-                border_color=T.BORDER
-            )
-            card.grid(row=0, column=0, sticky="nsew", padx=150, pady=70)
-            card.grid_columnconfigure(0, weight=1)
-
-            icon = "⚡" if accuracy >= 70 else "💪"
-            color = T.GREEN if accuracy >= 80 else T.BLUE if accuracy >= 50 else T.ORANGE
-            title = (
-                "PHẢN XẠ RẤT TỐT!"
-                if accuracy >= 80
-                else "KHÁ ỔN RỒI!"
-                if accuracy >= 50
-                else "CẦN LUYỆN THÊM!"
-            )
-
-            ctk.CTkLabel(card, text=icon, font=ctk.CTkFont(size=110)).pack(pady=(45, 15))
-
-            ctk.CTkLabel(
-                card,
-                text=title,
-                font=ctk.CTkFont(size=31, weight="bold"),
-                text_color=color
-            ).pack(pady=(0, 10))
-
-            ctk.CTkLabel(
-                card,
-                text=f"Bạn làm đúng {correct} / {total} ký hiệu.",
-                font=ctk.CTkFont(size=18),
-                text_color=T.MUTED
-            ).pack(pady=(0, 25))
-
-            stats = ctk.CTkFrame(card, fg_color="#080C11", corner_radius=16)
-            stats.pack(pady=(0, 28), padx=50, fill="x")
-            stats.grid_columnconfigure((0, 1, 2), weight=1)
-
-            for i, (label, value, c) in enumerate([
-                ("Độ chính xác", f"{accuracy}%", color),
-                ("Phản xạ TB", f"{avg_time:.2f}s" if avg_time else "--", T.ORANGE),
-                ("Thời gian học", f"{session_minutes} phút", T.BLUE),
-            ]):
-                cell = ctk.CTkFrame(stats, fg_color="transparent")
-                cell.grid(row=0, column=i, sticky="nsew", padx=15, pady=18)
-
-                ctk.CTkLabel(
-                    cell,
-                    text=label,
-                    font=ctk.CTkFont(size=14),
-                    text_color=T.MUTED
-                ).pack()
-
-                ctk.CTkLabel(
-                    cell,
-                    text=value,
-                    font=ctk.CTkFont(size=30, weight="bold"),
-                    text_color=c
-                ).pack(pady=(4, 0))
-
-            mistakes = [r["target"] for r in self.reaction_results if not r["correct"]]
-
-            mistakes = [r["target"] for r in self.reaction_results if not r["correct"]]
-
-            # ==========================================
-            # BÍ KÍP 3: THÔNG BÁO GHI NHẬN ĐIỂM SỐ RÕ RÀNG THEO TRẠNG THÁI
-            # ==========================================
-            if is_logged_in:
-                note = "✓ Kết quả đã được ghi nhận và tính vào Độ chính xác TB."
-                note_color = T.GREEN
-            else:
-                note = "⚠ Vui lòng đăng nhập để lưu kết quả!"
-                note_color = T.ORANGE
-
-            if mistakes:
-                note += "\nKý hiệu nên ôn lại: " + ", ".join(mistakes[:6])
-
-            ctk.CTkLabel(
-                card,
-                text=note,
-                font=ctk.CTkFont(size=15, weight="bold"), # In đậm lên cho dễ chú ý
-                text_color=note_color, # Đổi màu linh hoạt (Xanh lá / Cam)
-                justify="center",
-                wraplength=650
-            ).pack(pady=(0, 28))
-
-            btns = ctk.CTkFrame(card, fg_color="transparent")
-            btns.pack()
-
-            ctk.CTkButton(
-                btns,
-                text="⟳ Luyện lại",
-                height=50,
-                width=180,
-                fg_color=T.CARD,
-                hover_color=T.CARD_HOVER,
-                border_width=1,
-                border_color=T.BORDER,
-                font=ctk.CTkFont(size=16, weight="bold"),
-                command=self.show_reaction_training
-            ).pack(side="left", padx=10)
-
-            ctk.CTkButton(
-                btns,
-                text="← Trở về Ôn tập",
-                height=50,
-                width=180,
-                fg_color=T.BLUE,
-                hover_color=T.BLUE_DARK,
-                font=ctk.CTkFont(size=16, weight="bold"),
-                command=self.show_review
-            ).pack(side="left", padx=10)
-
-        def finish_round(ok, confidence):
-            if not self.reaction_round_started:
-                return
-
-            target = self.reaction_targets[self.reaction_index]
-            reaction_time = time.time() - self.reaction_round_start if ok else None
-
-            self.reaction_results.append({
-                "target": target,
-                "correct": bool(ok),
-                "reaction_time": reaction_time,
-                "confidence": confidence,
-            })
-
-            add_history_row(target, ok, reaction_time, confidence)
-            update_header_stats()
-
-            self.reaction_round_started = False
-            self.reaction_success_frames = 0
-            self.sequence_data.clear()
-            self.prev_wx, self.prev_wy = None, None
-
-            if ok:
-                self.reaction_feedback_label.configure(
-                    text="☆ Chính xác! Chuyển sang ký hiệu tiếp theo...",
-                    fg_color="#17351F",
-                    text_color=T.GREEN
-                )
-            else:
-                self.reaction_feedback_label.configure(
-                    text=f"☆ Quá giờ! Đáp án là chữ {target}.",
-                    fg_color="#451A1F",
-                    text_color=T.RED
-                )
-
-            self.reaction_index += 1
-
-            if self.reaction_index >= len(self.reaction_targets):
-                self.after(1000, show_result_page)
-            else:
-                self.after(900, start_round)
-
-        def start_round():
-            if self.reaction_index >= len(self.reaction_targets):
-                show_result_page()
-                return
-
-            target = self.reaction_targets[self.reaction_index]
-
-            self.reaction_round_started = True
-            self.reaction_round_start = time.time()
-            self.reaction_success_frames = 0
-            self.reaction_best_confidence = 0.0
-
-            self.sequence_data.clear()
-            self.prev_wx, self.prev_wy = None, None
-
-            self.reaction_target_label.configure(text=f"Chữ {target}")
-            self.reaction_pred_label.configure(text="--", text_color=T.TEXT)
-            self.reaction_conf_label.configure(text="0%", text_color=T.BLUE)
-            self.reaction_conf_bar.configure(progress_color=T.BLUE)
-            self.reaction_conf_bar.set(0)
-            self.reaction_timer_bar.configure(progress_color=T.BLUE)
-            self.reaction_timer_bar.set(1)
-            self.reaction_timer_label.configure(text="04.0s", text_color=T.BLUE)
-            self.reaction_feedback_label.configure(
-                text="☆ Làm ký hiệu này càng nhanh càng tốt!",
-                fg_color="#102034",
-                text_color=T.BLUE
-            )
-
-            render_target_preview()
-            update_header_stats()
-
-        def load_ai_dependencies():
-            try:
-                import mediapipe as mp
-
-                # BÍ KÍP 1: Tái sử dụng MediaPipe, tuyệt đối không đóng/mở lại gây kẹt RAM
-                if self.mp_hands is None:
-                    self.mp_hands = mp.solutions.hands.Hands(
-                        static_image_mode=False,
-                        max_num_hands=2,
-                        min_detection_confidence=0.7,
-                    )
-                    self.mp_draw = mp.solutions.drawing_utils
-            except Exception as e:
-                print("[Luyện phản xạ] Lỗi load MediaPipe:", e)
-                return False
-
-            try:
-                import numpy as np
-                import onnxruntime as ort
-
-                # Tái sử dụng Model AI
-                if self.ai_session is None:
-                    root = self._asset_project_root()
-                    model_path = os.path.join(root, "model", "model.onnx")
-                    labels_path = os.path.join(root, "model", "labels.npy")
-
-                    if not os.path.exists(model_path):
-                        model_path = os.path.join("model", "model.onnx")
-                    if not os.path.exists(labels_path):
-                        labels_path = os.path.join("model", "labels.npy")
-
-                    if os.path.exists(model_path) and os.path.exists(labels_path):
-                        self.ai_session = ort.InferenceSession(
-                            model_path,
-                            providers=["CPUExecutionProvider"]
-                        )
-                        self.ai_labels = np.load(labels_path)
-                    else:
-                        from tkinter import messagebox
-                        messagebox.showerror(
-                            "Lỗi AI",
-                            "Không tìm thấy model/model.onnx hoặc model/labels.npy."
-                        )
-                        return False
-            except Exception as e:
-                from tkinter import messagebox
-                messagebox.showerror("Lỗi AI", f"Không tải được mô hình AI: {e}")
-                return False
-
-            return True
-
+        # ---------- 5) CORE LOGIC CỦA GAME (AI & VÒNG LẶP) ----------
         def hand_vectorlize(landmarks, hand_type, prev_wx, prev_wy):
             import numpy as np
-
             wx, wy = landmarks[0].x, landmarks[0].y
             vector = []
-
-            for i in range(1, 21):
-                x = landmarks[i].x - wx
-                y = landmarks[i].y - wy
-                vector.extend([x, y])
-
-            if prev_wx is None or prev_wy is None:
-                delta_x = 0.0
-                delta_y = 0.0
-            else:
-                delta_x = wx - prev_wx
-                delta_y = wy - prev_wy
-
-            if abs(delta_x) < 0.008:
-                delta_x = 0.0
-            if abs(delta_y) < 0.008:
-                delta_y = 0.0
-
-            delta_x *= 30
-            delta_y *= 30
-
+            for i in range(1, 21): vector.extend([landmarks[i].x - wx, landmarks[i].y - wy])
+            delta_x = 0.0 if prev_wx is None else (wx - prev_wx) * 30
+            delta_y = 0.0 if prev_wy is None else (wy - prev_wy) * 30
+            if abs(delta_x) < 0.24: delta_x = 0.0
+            if abs(delta_y) < 0.24: delta_y = 0.0
             vector.extend([hand_type, delta_x, delta_y])
             return np.array(vector), wx, wy
 
         def update_reaction_frame():
-            if not self.practice_camera_on or self.practice_cap is None:
-                return
+            if not self.practice_camera_on or self.practice_cap is None: return
 
             try:
-                import cv2
-                import mediapipe as mp
-                import numpy as np
-                from PIL import Image
-
                 success, frame = self.practice_cap.read()
-
                 if success:
-                    frame = cv2.flip(frame, 1)
-                    h, w = frame.shape[:2]
+                    self.practice_frame_counter += 1
+                    import cv2, numpy as np, mediapipe as mp, PIL.Image
+                    frame = cv2.flip(frame, 1); h, w = frame.shape[:2]
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
                     hand_detected = False
-                    predicted_char = ""
-                    target_confidence = 0.0
+                    current_target = self.reaction_targets[self.reaction_index] if self.reaction_index < len(self.reaction_targets) else ""
 
-                    current_target = (
-                        self.reaction_targets[self.reaction_index]
-                        if self.reaction_index < len(self.reaction_targets)
-                        else ""
-                    )
-
-                    if self.mp_hands is not None:
+                    if getattr(self, 'mp_hands', None) is not None:
                         results = self.mp_hands.process(frame_rgb)
+                        hands_detected = len(results.multi_hand_landmarks) if results.multi_hand_landmarks else 0
 
-                        if results.multi_hand_landmarks:
+                        if hands_detected > 0:
                             hand_detected = True
+                            for hl in results.multi_hand_landmarks:
+                                self.mp_draw.draw_landmarks(frame, hl, mp.solutions.hands.HAND_CONNECTIONS)
+                            
+                            try:
+                                from core.train_window_both import extract_86_features
+                                from core.translate_window import predict_sign
+                            except Exception: pass
 
-                            for hand_landmarks, handedness in zip(
-                                results.multi_hand_landmarks,
-                                results.multi_handedness
-                            ):
-                                self.mp_draw.draw_landmarks(
-                                    frame,
-                                    hand_landmarks,
-                                    mp.solutions.hands.HAND_CONNECTIONS
-                                )
+                            # LUỒNG 1 TAY
+                            if hands_detected == 1 and getattr(self, 'lstm_model_1', None):
+                                self.seq_2_hands.clear()
+                                handedness = results.multi_handedness[0]
+                                hand_type = 0 if handedness.classification[0].label == "Left" else 1
+                                vec_43, self.prev_wx_l, self.prev_wy_l = hand_vectorlize(results.multi_hand_landmarks[0].landmark, hand_type, self.prev_wx_l, self.prev_wy_l)
+                                self.seq_1_hand.append(vec_43)
+                                if len(self.seq_1_hand) > 30: self.seq_1_hand.pop(0)
+                                if len(self.seq_1_hand) == 30 and (self.practice_frame_counter % 3 == 0):
+                                    pred_txt, prob = predict_sign(self.lstm_model_1, self.action_labels_1, self.seq_1_hand)
+                                    self.cached_predicted_char = pred_txt
+                                    self.cached_target_confidence = prob if pred_txt.upper() == current_target.upper() else (0.0 if prob > 0.5 else self.cached_target_confidence)
 
-                                label_hand = handedness.classification[0].label
-                                hand_type = 0 if label_hand == "Left" else 1
-
-                                vector, self.prev_wx, self.prev_wy = hand_vectorlize(
-                                    hand_landmarks.landmark,
-                                    hand_type,
-                                    self.prev_wx,
-                                    self.prev_wy
-                                )
-
-                                self.sequence_data.append(vector)
-
-                                if len(self.sequence_data) > 30:
-                                    self.sequence_data.pop(0)
-
-                                if len(self.sequence_data) == 30 and self.ai_session is not None:
-                                    try:
-                                        input_data = np.expand_dims(
-                                            self.sequence_data,
-                                            axis=0
-                                        ).astype(np.float32)
-
-                                        input_name = self.ai_session.get_inputs()[0].name
-                                        out = self.ai_session.run(None, {input_name: input_data})[0][0]
-
-                                        max_prob, max_index = np.max(out), np.argmax(out)
-
-                                        if max_prob > 0.5:
-                                            predicted_char = str(self.ai_labels[max_index]).upper()
-
-                                        for idx, lbl in enumerate(self.ai_labels):
-                                            if str(lbl).upper() == current_target.upper():
-                                                target_confidence = float(out[idx])
-                                                break
-                                    except Exception:
-                                        pass
+                            # LUỒNG 2 TAY
+                            elif hands_detected == 2 and getattr(self, 'lstm_model_2', None):
+                                self.seq_1_hand.clear()
+                                vec_86, self.prev_wx_l, self.prev_wy_l, self.prev_wx_r, self.prev_wy_r = extract_86_features(results, self.prev_wx_l, self.prev_wy_l, self.prev_wx_r, self.prev_wy_r)
+                                if vec_86 is not None:
+                                    self.seq_2_hands.append(vec_86)
+                                    if len(self.seq_2_hands) > 30: self.seq_2_hands.pop(0)
+                                    if len(self.seq_2_hands) == 30 and (self.practice_frame_counter % 3 == 0):
+                                        pred_txt, prob = predict_sign(self.lstm_model_2, self.action_labels_2, self.seq_2_hands)
+                                        self.cached_predicted_char = pred_txt
+                                        self.cached_target_confidence = prob if pred_txt.upper() == current_target.upper() else (0.0 if prob > 0.5 else self.cached_target_confidence)
                         else:
-                            self.sequence_data.clear()
-                            self.prev_wx, self.prev_wy = None, None
+                            self.seq_1_hand.clear(); self.seq_2_hands.clear()
+                            self.prev_wx_l = self.prev_wy_l = self.prev_wx_r = self.prev_wy_r = None
+
+                    # KIỂM TRA ĐIỀU KIỆN THẮNG/THUA TRONG VÒNG LẶP
                     if not self.reaction_round_started:
-                        target_confidence = 0.0
-                        predicted_char = ""
+                        self.cached_target_confidence = 0.0
+                        self.cached_predicted_char = ""
                         self.reaction_success_frames = 0
-                    if target_confidence > self.reaction_best_confidence:
-                        self.reaction_best_confidence = target_confidence
+                    else:
+                        if self.cached_target_confidence > self.reaction_best_confidence:
+                            self.reaction_best_confidence = self.cached_target_confidence
 
                     if hand_detected:
-                        if target_confidence >= 0.8:
-                            ui_color = T.GREEN
-                            bgr_color = (0, 200, 0)
-                            self.reaction_success_frames += 1
-                        elif target_confidence >= 0.4:
-                            ui_color = T.YELLOW
-                            bgr_color = (0, 215, 255)
-                            self.reaction_success_frames = 0
-                        else:
-                            ui_color = T.ORANGE
-                            bgr_color = (0, 140, 255)
-                            self.reaction_success_frames = 0
+                        if self.cached_target_confidence >= 0.8: ui_color = T.GREEN; bgr_color = (0, 200, 0); self.reaction_success_frames += 1
+                        elif self.cached_target_confidence >= 0.4: ui_color = T.YELLOW; bgr_color = (0, 215, 255); self.reaction_success_frames = 0
+                        else: ui_color = T.ORANGE; bgr_color = (0, 140, 255); self.reaction_success_frames = 0
 
-                        self.reaction_conf_bar.configure(progress_color=ui_color)
-                        self.reaction_conf_bar.set(target_confidence)
-
-                        self.reaction_conf_label.configure(
-                            text=f"{int(target_confidence * 100)}%",
-                            text_color=ui_color
-                        )
-
-                        self.reaction_pred_label.configure(
-                            text=predicted_char or "--",
-                            text_color=ui_color if predicted_char == current_target else T.ORANGE
-                        )
-
-                        cv2.putText(
-                            frame,
-                            f"Target: {current_target} | {int(target_confidence * 100)}%",
-                            (18, 36),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.8,
-                            bgr_color,
-                            2
-                        )
+                        self.reaction_conf_bar.configure(progress_color=ui_color); self.reaction_conf_bar.set(self.cached_target_confidence)
+                        self.reaction_conf_label.configure(text=f"{int(self.cached_target_confidence * 100)}%", text_color=ui_color)
+                        self.reaction_pred_label.configure(text=self.cached_predicted_char or "--", text_color=ui_color if self.cached_predicted_char == current_target else T.ORANGE)
                     else:
                         self.reaction_success_frames = 0
-                        self.reaction_conf_bar.configure(progress_color=T.BLUE)
-                        self.reaction_conf_bar.set(0)
-
-                        self.reaction_conf_label.configure(
-                            text="0%",
-                            text_color=T.BLUE
-                        )
-
-                        self.reaction_pred_label.configure(
-                            text="--",
-                            text_color=T.TEXT
-                        )
+                        self.reaction_conf_bar.configure(progress_color=T.BLUE); self.reaction_conf_bar.set(0)
+                        self.reaction_conf_label.configure(text="0%", text_color=T.BLUE); self.reaction_pred_label.configure(text="--", text_color=T.TEXT)
 
                     if self.reaction_round_started:
                         elapsed = time.time() - self.reaction_round_start
                         remain = max(0.0, self.reaction_time_limit - elapsed)
                         ratio = remain / self.reaction_time_limit
+                        timer_color = T.GREEN if ratio > 0.55 else T.YELLOW if ratio > 0.25 else T.RED
+                        
+                        self.reaction_timer_bar.configure(progress_color=timer_color); self.reaction_timer_bar.set(ratio)
+                        self.reaction_timer_label.configure(text=f"{remain:04.1f}s", text_color=timer_color)
 
-                        timer_color = (
-                            T.GREEN
-                            if ratio > 0.55
-                            else T.YELLOW
-                            if ratio > 0.25
-                            else T.RED
-                        )
+                        # Chốt điểm
+                        if self.reaction_success_frames >= 7: finish_round(True, self.cached_target_confidence)
+                        elif remain <= 0: finish_round(False, self.reaction_best_confidence)
 
-                        self.reaction_timer_bar.configure(progress_color=timer_color)
-                        self.reaction_timer_bar.set(ratio)
-
-                        self.reaction_timer_label.configure(
-                            text=f"{remain:04.1f}s",
-                            text_color=timer_color
-                        )
-
-                        if self.reaction_success_frames >= 8:
-                            finish_round(True, target_confidence)
-                        elif remain <= 0:
-                            finish_round(False, self.reaction_best_confidence)
-
+                    # RENDER CAMERA
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                    # ==========================================
-                    # BÍ KÍP 2: RENDER CAMERA THEO TỶ LỆ CHUẨN, KHÔNG BỊ ZOOM
-                    # ==========================================
-                    display_w = 720
-                    display_h = 430
-
-                    scale = min(display_w / w, display_h / h)
+                    scale = min(720 / w, 430 / h)
                     new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+                    frame_resized = cv2.resize(frame_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                    img = PIL.Image.fromarray(frame_resized)
+                    imgtk = ctk.CTkImage(light_image=img, dark_image=img, size=(new_w, new_h))
+                    self.practice_video_label.configure(image=imgtk, text=""); self.practice_video_label.image = imgtk
 
-                    frame_resized = cv2.resize(
-                        frame_rgb,
-                        (new_w, new_h),
-                        interpolation=cv2.INTER_AREA
-                    )
+            except Exception as e: print("[Luyện phản xạ] Lỗi khung hình:", e)
+            if self.practice_camera_on: self.practice_after_id = self.after(33, update_reaction_frame)
 
-                    img = Image.fromarray(frame_resized)
-                    imgtk = ctk.CTkImage(
-                        light_image=img,
-                        dark_image=img,
-                        size=(new_w, new_h)
-                    )
+        def start_round():
+            if self.reaction_index >= len(self.reaction_targets):
+                show_result_page(); return
 
-                    self.practice_video_label.configure(image=imgtk, text="")
-                    self.practice_video_label.image = imgtk
-
-            except Exception as e:
-                print("[Luyện phản xạ] Lỗi khung hình:", e)
-
-            if self.practice_camera_on:
-                self.practice_after_id = self.after(10, update_reaction_frame)
-        def stop_reaction_training():
-            safe_stop()
-
-            self.reaction_round_started = False
-            self.reaction_round_start = None
+            target = self.reaction_targets[self.reaction_index]
+            self.reaction_round_started = True
+            self.reaction_round_start = time.time()
             self.reaction_success_frames = 0
             self.reaction_best_confidence = 0.0
-            self.reaction_index = 0
-            self.reaction_results.clear()
 
-            self.sequence_data.clear()
-            self.prev_wx, self.prev_wy = None, None
+            self.seq_1_hand.clear(); self.seq_2_hands.clear()
+            self.prev_wx_l = self.prev_wy_l = self.prev_wx_r = self.prev_wy_r = None
 
-            self.practice_status_label.configure(
-                text="● Camera đang tắt",
-                text_color=T.MUTED,
-                fg_color="#2A2F35"
-            )
+            self.reaction_target_label.configure(text=f"Chữ {target}")
+            self.reaction_pred_label.configure(text="--", text_color=T.TEXT)
+            self.reaction_conf_label.configure(text="0%", text_color=T.BLUE)
+            self.reaction_conf_bar.configure(progress_color=T.BLUE); self.reaction_conf_bar.set(0)
+            self.reaction_timer_bar.configure(progress_color=T.BLUE); self.reaction_timer_bar.set(1)
+            self.reaction_timer_label.configure(text="04.0s", text_color=T.BLUE)
+            self.reaction_feedback_label.configure(text="☆ Làm ký hiệu này càng nhanh càng tốt!", fg_color="#102034", text_color=T.BLUE)
 
-            # ==========================================
-            # BÍ KÍP 2: DÙNG ẢNH ĐEN (BLANK IMAGE) ĐỂ XÓA MÀN HÌNH MỘT CÁCH AN TOÀN
-            # Tuyệt đối không dùng image=None để tránh Exception Tkinter
-            # ==========================================
-            from PIL import Image
-            blank_img = Image.new('RGB', (10, 10), (8, 12, 17))
-            blank_ctk = ctk.CTkImage(light_image=blank_img, dark_image=blank_img, size=(10, 10))
+            render_target_preview()
+            correct = sum(1 for r in self.reaction_results if r["correct"])
+            self.reaction_score_label.configure(text=f"Đúng: {correct}")
+            self.reaction_question_label.configure(text=f"Câu {self.reaction_index + 1} / {len(self.reaction_targets)}")
+
+        def finish_round(ok, confidence):
+            if not self.reaction_round_started: return
+            target = self.reaction_targets[self.reaction_index]
+            reaction_time = time.time() - self.reaction_round_start if ok else None
+
+            self.reaction_results.append({"target": target, "correct": bool(ok), "reaction_time": reaction_time, "confidence": confidence})
             
-            self.practice_video_label.configure(
-                image=blank_ctk,
-                text="⚡\n\nNhấn 'Bắt đầu phản xạ' để mở camera"
-            )
-            self.practice_video_label.image = blank_ctk
+            correct = sum(1 for r in self.reaction_results if r["correct"])
+            self.reaction_score_label.configure(text=f"Đúng: {correct}")
 
-            self.reaction_question_label.configure(
-                text=f"0 / {len(self.reaction_targets)}"
-            )
-            self.reaction_score_label.configure(text="Đúng: 0")
+            self.reaction_round_started = False
+            self.reaction_success_frames = 0
+            self.seq_1_hand.clear(); self.seq_2_hands.clear()
+            self.prev_wx_l = self.prev_wy_l = self.prev_wx_r = self.prev_wy_r = None
 
-            set_waiting_target_ui("Chờ bắt đầu")
+            if ok: self.reaction_feedback_label.configure(text="☆ Chính xác! Chuyển sang ký hiệu tiếp theo...", fg_color="#17351F", text_color=T.GREEN)
+            else: self.reaction_feedback_label.configure(text=f"☆ Quá giờ! Đáp án là chữ {target}.", fg_color="#451A1F", text_color=T.RED)
 
-            self.reaction_feedback_label.configure(
-                text="☆ Sẵn sàng chưa? Nhấn bắt đầu để luyện phản xạ.",
-                fg_color="#2A2F35",
-                text_color=T.MUTED
-            )
+            self.reaction_index += 1
+            if self.reaction_index >= len(self.reaction_targets): self.after(1000, show_result_page)
+            else: self.after(900, start_round)
 
-            start_btn.configure(
-                text="▶  Bắt đầu phản xạ",
-                fg_color=T.ORANGE,
-                hover_color="#D98200",
-                command=start_training
-            )
+        def show_result_page():
+            safe_stop()
+            total = len(self.reaction_results) or len(self.reaction_targets)
+            correct = sum(1 for r in self.reaction_results if r["correct"])
+            accuracy = int((correct / total) * 100) if total else 0
+            correct_times = [r["reaction_time"] for r in self.reaction_results if r["correct"] and r["reaction_time"] is not None]
+            avg_time = sum(correct_times) / len(correct_times) if correct_times else 0
+            session_minutes = max(1, int((time.time() - self.reaction_session_start) / 60))
+
+            try:
+                import user_db
+                if is_logged_in and auth_module and getattr(auth_module, "CURRENT_USER", None):
+                    updated = user_db.update_study_stats(auth_module.CURRENT_USER["id"], accuracy, session_time_minutes=session_minutes)
+                    if updated: auth_module.CURRENT_USER.update(updated)
+            except Exception as e: print("[Luyện phản xạ] Không lưu được thống kê:", e)
+
+            result_page = self._clear_page()
+            result_page.grid_columnconfigure(0, weight=1); result_page.grid_rowconfigure(0, weight=1)
+
+            card = ctk.CTkFrame(result_page, fg_color=T.PANEL, corner_radius=20, border_width=1, border_color=T.BORDER)
+            card.grid(row=0, column=0, sticky="nsew", padx=150, pady=70); card.grid_columnconfigure(0, weight=1)
+
+            icon = "⚡" if accuracy >= 70 else "💪"
+            color = T.GREEN if accuracy >= 80 else T.BLUE if accuracy >= 50 else T.ORANGE
+            title = "PHẢN XẠ RẤT TỐT!" if accuracy >= 80 else "KHÁ ỔN RỒI!" if accuracy >= 50 else "CẦN LUYỆN THÊM!"
+
+            ctk.CTkLabel(card, text=icon, font=ctk.CTkFont(size=110)).pack(pady=(45, 15))
+            ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=31, weight="bold"), text_color=color).pack(pady=(0, 10))
+            ctk.CTkLabel(card, text=f"Bạn làm đúng {correct} / {total} ký hiệu.", font=ctk.CTkFont(size=18), text_color=T.MUTED).pack(pady=(0, 25))
+
+            stats = ctk.CTkFrame(card, fg_color="#080C11", corner_radius=16)
+            stats.pack(pady=(0, 28), padx=50, fill="x"); stats.grid_columnconfigure((0, 1, 2), weight=1)
+
+            for i, (label, value, c) in enumerate([("Độ chính xác", f"{accuracy}%", color), ("Phản xạ TB", f"{avg_time:.2f}s" if avg_time else "--", T.ORANGE), ("Thời gian học", f"{session_minutes} phút", T.BLUE)]):
+                cell = ctk.CTkFrame(stats, fg_color="transparent")
+                cell.grid(row=0, column=i, sticky="nsew", padx=15, pady=18)
+                ctk.CTkLabel(cell, text=label, font=ctk.CTkFont(size=14), text_color=T.MUTED).pack()
+                ctk.CTkLabel(cell, text=value, font=ctk.CTkFont(size=30, weight="bold"), text_color=c).pack(pady=(4, 0))
+
+            mistakes = [r["target"] for r in self.reaction_results if not r["correct"]]
+            note = "✓ Kết quả đã được ghi nhận và tính vào Độ chính xác TB." if is_logged_in else "⚠ Vui lòng đăng nhập để lưu kết quả!"
+            note_color = T.GREEN if is_logged_in else T.ORANGE
+            if mistakes: note += "\nKý hiệu nên ôn lại: " + ", ".join(mistakes[:6])
+
+            ctk.CTkLabel(card, text=note, font=ctk.CTkFont(size=15, weight="bold"), text_color=note_color, justify="center", wraplength=650).pack(pady=(0, 28))
+
+            btns = ctk.CTkFrame(card, fg_color="transparent"); btns.pack()
+            ctk.CTkButton(btns, text="⟳ Luyện lại", height=50, width=180, fg_color=T.CARD, hover_color=T.CARD_HOVER, border_width=1, border_color=T.BORDER, font=ctk.CTkFont(size=16, weight="bold"), command=self.show_reaction_training).pack(side="left", padx=10)
+            ctk.CTkButton(btns, text="← Trở về Ôn tập", height=50, width=180, fg_color=T.BLUE, hover_color=T.BLUE_DARK, font=ctk.CTkFont(size=16, weight="bold"), command=self.show_review).pack(side="left", padx=10)
+
+        # ---------- 6) ĐỘNG CƠ KHỞI ĐỘNG (HOẠT ĐỘNG ĐỒNG BỘ 100%) ----------
         def start_training():
             import cv2
+            
+            # Khóa nút ngay lập tức để người dùng không bấm liên tục
+            start_btn.configure(text="⏳ Đang tải AI & Camera...", state="disabled", fg_color=T.MUTED)
+            self.practice_status_label.configure(text="● Đang khởi động...", text_color=T.ORANGE)
+            set_waiting_target_ui("Đang nạp AI...")
+            self.update_idletasks() # Ép giao diện vẽ lại ngay lập tức
 
-            safe_stop()
-
-            if not load_ai_dependencies():
+            # 1. NẠP AI ĐỒNG BỘ (An toàn tuyệt đối cho Tkinter)
+            try:
+                import mediapipe as mp
+                self.mp_hands = mp.solutions.hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.7)
+                self.mp_draw = mp.solutions.drawing_utils
+                from core.translate_window import load_lstm_model, load_lstm_model_both
+                if not getattr(self, 'lstm_model_1', None): self.lstm_model_1, self.action_labels_1 = load_lstm_model()
+                if not getattr(self, 'lstm_model_2', None): self.lstm_model_2, self.action_labels_2 = load_lstm_model_both()
+            except Exception as e:
+                messagebox.showerror("Lỗi AI", f"Không nạp được mô hình AI: {e}")
+                reset_ui_to_idle()
                 return
 
-            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(0)
+            # 2. DÒ TÌM CAMERA ĐỒNG BỘ
+            cap = None
+            for cam_idx in [0, 1, 2]:
+                cap = cv2.VideoCapture(cam_idx)
+                if cap and cap.isOpened(): break
+                if os.name == "nt":
+                    cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
+                    if cap and cap.isOpened(): break
+
+            if cap is None or not cap.isOpened():
+                if cap: cap.release()
+                messagebox.showerror("Lỗi Camera", "Không mở được camera!\n1. Vui lòng tắt camera ở màn hình 'Dịch tự do'.\n2. Tắt Zoom, Zalo Call.")
+                reset_ui_to_idle()
+                return
+
+            # 3. SET UP HOÀN TẤT VÀ CHẠY
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             cap.set(cv2.CAP_PROP_FPS, 30)
-            if not cap.isOpened():
-                messagebox.showerror("Lỗi", "Không mở được camera.")
-                cap.release()
-                return
 
             self.practice_cap = cap
             self.practice_camera_on = True
-
             self.reaction_results.clear()
             self.reaction_index = 0
             self.reaction_session_start = time.time()
+            self.seq_1_hand.clear(); self.seq_2_hands.clear()
 
-            self.practice_status_label.configure(
-                text="● Camera đang bật",
-                text_color=T.GREEN,
-                fg_color="#17351F"
-            )
-
-            start_btn.configure(
-                text="■  Dừng luyện",
-                fg_color=T.RED,
-                hover_color="#D32F2F",
-                command=stop_reaction_training
-            )
+            start_btn.configure(text="■  Dừng luyện", state="normal", fg_color=T.RED, hover_color="#D32F2F", command=stop_reaction_training)
+            self.practice_status_label.configure(text="● Camera đang bật", text_color=T.GREEN, fg_color="#17351F")
 
             set_waiting_target_ui("Sắp bắt đầu...")
             begin_start_countdown(3)
             update_reaction_frame()
 
-        set_waiting_target_ui("Chờ bắt đầu")
         start_btn.configure(command=start_training)
     # ==========================================
     # KHỐI LOGIC: CỖ MÁY BÀI KIỂM TRA NHANH

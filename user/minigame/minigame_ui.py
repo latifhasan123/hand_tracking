@@ -188,7 +188,59 @@ class MinigameFrame(ctk.CTkFrame):
         box.grid_propagate(False)
         ctk.CTkLabel(box, text=text, font=(FONT, font_size, "bold"), text_color="white").place(relx=0.5, rely=0.5, anchor="center")
         return box
+    def show_full_leaderboard(self):
+        """Trang xem toàn bộ bảng xếp hạng Server"""
+        self.current_screen = "leaderboard"
+        self.clear_content()
+        page = self._page()
+        
+        header = ctk.CTkFrame(page, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 14))
+        header.grid_columnconfigure(0, weight=1)
+        
+        ctk.CTkLabel(header, text="BẢNG XẾP HẠNG TỔNG 🏆", font=(FONT, 30, "bold"), text_color=COLORS["text"]).grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(header, text="← Trở về", font=(FONT, 15, "bold"), fg_color=COLORS["panel"], hover_color=COLORS["stroke"], height=40, command=self.show_dashboard).grid(row=0, column=1, sticky="e", padx=20)
 
+        # Lấy dữ liệu 50 người đứng đầu từ Server
+        leaderboard_data = []
+        db = self._get_db()
+        if db and hasattr(db, "get_leaderboard"):
+            try:
+                db_ranks = db.get_leaderboard(50) # Tải 50 top players
+                for idx, row in enumerate(db_ranks):
+                    leaderboard_data.append((str(idx+1), ["🥇", "🥈", "🥉"][idx] if idx < 3 else "▪", row[0], str(row[1])))
+            except Exception as e: print("Lỗi lấy DB BXH Tổng:", e)
+
+        # Vẽ danh sách vào ScrollableFrame để cuộn được nếu đông người
+        list_frame = ctk.CTkScrollableFrame(page, fg_color="transparent")
+        list_frame.grid(row=1, column=0, sticky="nsew", pady=10)
+        
+        if not leaderboard_data:
+            ctk.CTkLabel(list_frame, text="Chưa có dữ liệu bảng xếp hạng.", font=(FONT, 16), text_color=COLORS["muted"]).pack(pady=40)
+            return
+
+        for idx, (rank, icon, name, score) in enumerate(leaderboard_data):
+            is_me = (self.current_user and name == self.current_user.get("username"))
+            row_bg = "#122A4F" if is_me else COLORS["card"]
+            border = COLORS["blue"] if is_me else COLORS["stroke"]
+            
+            row = ctk.CTkFrame(list_frame, fg_color=row_bg, border_color=border, border_width=1, corner_radius=12, height=65)
+            row.pack(fill="x", pady=6, padx=10)
+            row.pack_propagate(False)
+            
+            # Cột Hạng
+            rank_lbl = ctk.CTkLabel(row, text=f"#{rank}", font=(FONT, 18, "bold"), text_color=COLORS["muted"] if idx >= 3 else COLORS["yellow"])
+            rank_lbl.pack(side="left", padx=(20, 10))
+            
+            # Icon
+            ctk.CTkLabel(row, text=icon, font=(FONT, 24)).pack(side="left", padx=(0, 15))
+            
+            # Tên (Hiện chữ Bạn nếu đúng là tài khoản đang đăng nhập)
+            display_name = f"{name} (Bạn)" if is_me else name
+            ctk.CTkLabel(row, text=display_name, font=(FONT, 18, "bold" if is_me else "normal"), text_color=COLORS["text"]).pack(side="left")
+            
+            # Điểm
+            ctk.CTkLabel(row, text=f"{score} pt", font=(FONT, 20, "bold"), text_color=COLORS["yellow"] if idx < 3 else COLORS["blue_2"]).pack(side="right", padx=25)
     # ---------- Dashboard ----------
     def show_dashboard(self):
         if hasattr(self, '_stop_word_timer'): self._stop_word_timer()
@@ -228,7 +280,11 @@ class MinigameFrame(ctk.CTkFrame):
         ctk.CTkLabel(header, text="🏆  Bảng xếp hạng tuần", font=(FONT, 20, "bold"), text_color=COLORS["text"]).grid(row=0, column=0, sticky="w")
         
         if self.current_user_id:
-            ctk.CTkLabel(header, text="Xem tất cả  →", font=(FONT, 14), text_color=COLORS["blue_2"], cursor="hand2").grid(row=0, column=1, sticky="e")
+            # BÍ KÍP KÍCH HOẠT NÚT BẤM (Cursor="hand2" và Bind Button-1)
+            lbl_view_all = ctk.CTkLabel(header, text="Xem tất cả  →", font=(FONT, 14), text_color=COLORS["blue_2"], cursor="hand2")
+            lbl_view_all.grid(row=0, column=1, sticky="e")
+            lbl_view_all.bind("<Button-1>", lambda e: self.show_full_leaderboard())
+            
             ranks_frame = ctk.CTkFrame(main, fg_color="transparent")
             ranks_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
             
@@ -306,20 +362,49 @@ class MinigameFrame(ctk.CTkFrame):
         return card
 
     def _daily_challenge(self, parent):
-        # BỎ FIX CỨNG HEIGHT: Để khung tự động giãn vừa với text
+        # Khung thẻ chính
         card = ctk.CTkFrame(parent, fg_color=COLORS["panel"], border_color=COLORS["stroke"], border_width=1, corner_radius=14)
         card.grid_columnconfigure(1, weight=1)
         
-        # Thêm pady=18 cho icon để tạo độ cao tự nhiên cho cả block
         ctk.CTkLabel(card, text="🎯", font=(FONT, 32), text_color=COLORS["orange"]).grid(row=0, column=0, rowspan=2, padx=20, pady=18)
         
-        # Chỉnh sticky="sw" (đẩy xuống đáy) cho title và "nw" (đẩy lên đỉnh) cho mô tả để chữ không bị đè
         ctk.CTkLabel(card, text="Thử thách hôm nay", font=(FONT, 16, "bold"), text_color=COLORS["text"]).grid(row=0, column=1, sticky="sw", pady=(18, 2))
-        ctk.CTkLabel(card, text="Hoàn thành 10 câu đoán chữ", font=(FONT, 13), text_color=COLORS["muted"]).grid(row=1, column=1, sticky="nw", pady=(0, 18))
+        ctk.CTkLabel(card, text="Tham gia Minigame 10 lần", font=(FONT, 13), text_color=COLORS["muted"]).grid(row=1, column=1, sticky="nw", pady=(0, 18))
         
-        ctk.CTkLabel(card, text="6 / 10", font=(FONT, 18, "bold"), text_color=COLORS["blue_2"]).grid(row=0, column=2, rowspan=2, padx=16)
+        # ==========================================
+        # BÍ KÍP: KẾT NỐI DỮ LIỆU THẬT TỪ DATABASE
+        # ==========================================
+        played_count = 0
+        is_completed = False
         
-        # Rút gọn chữ "Phần thưởng" thành "Thưởng" cho đỡ chật
+        if self.current_user_id:
+            try:
+                db = self._get_db()
+                if db and hasattr(db, "get_user_minigame_stats"):
+                    real_stats = db.get_user_minigame_stats(self.current_user_id)
+                    if real_stats:
+                        total_played = real_stats.get("TongSoLanTap", 0)
+                        
+                        # Dùng phép chia lấy dư để tạo vòng lặp thử thách liên tục
+                        played_count = total_played % 10 
+                        
+                        # Nếu vừa tròn 10, 20, 30... thì hiển thị 10/10 cho đẹp
+                        if total_played > 0 and played_count == 0:
+                            played_count = 10
+                            is_completed = True
+            except Exception as e:
+                print("Lỗi lấy dữ liệu thử thách:", e)
+                
+        # Hiển thị số liệu: Nếu chưa đăng nhập thì hiện ổ khóa 0/10
+        if not self.current_user_id:
+            progress_text = "🔒 0 / 10"
+            progress_color = COLORS["muted"]
+        else:
+            progress_text = f"✓ Hoàn thành" if is_completed else f"{played_count} / 10"
+            progress_color = COLORS["green"] if is_completed else COLORS["blue_2"]
+        
+        ctk.CTkLabel(card, text=progress_text, font=(FONT, 18, "bold"), text_color=progress_color).grid(row=0, column=2, rowspan=2, padx=16)
+        
         ctk.CTkLabel(card, text="🏅 Thưởng\n+50 điểm", font=(FONT, 14, "bold"), text_color=COLORS["yellow"], justify="center").grid(row=0, column=3, rowspan=2, padx=(0, 20))
         return card
 
@@ -350,17 +435,17 @@ class MinigameFrame(ctk.CTkFrame):
                 try:
                     real_stats = db.get_user_minigame_stats(self.current_user_id)
                     if real_stats:
+                        # ĐÃ XÓA HUY HIỆU - 4 Ô CÒN LẠI DÙNG DATA THẬT 100%
                         stats_data = [
                             ("🏆", "Điểm cao nhất", str(real_stats.get("DiemSo", 0)), "yellow"),
                             ("◎", "Tỉ lệ đúng", f"{real_stats.get('DoChinhXacTB', 0)}%", "green"),
                             ("🔥", "Chuỗi ngày học", str(real_stats.get("ChuoiNgayHoc", 0)), "orange"),
-                            ("🎮", "Số lần tập", str(real_stats.get("TongSoLanTap", 0)), "blue"),
-                            ("🎖", "Huy hiệu", str(max(1, real_stats.get("DiemSo", 0) // 100)), "purple"),
+                            ("🎮", "Số lần tập", str(real_stats.get("TongSoLanTap", 0)), "blue")
                         ]
                 except Exception as e: print("Lỗi lấy DB Thành tích:", e)
             
             if not stats_data:
-                stats_data = [("🏆", "Điểm cao nhất", "0", "yellow"), ("◎", "Tỉ lệ đúng", "0%", "green"), ("🔥", "Chuỗi ngày học", "0", "orange"), ("🎮", "Số lần tập", "0", "blue"), ("🎖", "Huy hiệu", "1", "purple")]
+                stats_data = [("🏆", "Điểm cao nhất", "0", "yellow"), ("◎", "Tỉ lệ đúng", "0%", "green"), ("🔥", "Chuỗi ngày học", "0", "orange"), ("🎮", "Số lần tập", "0", "blue")]
 
             for icon, title, value, color in stats_data:
                 self._stat_tile(panel, icon, title, value, color).pack(fill="x", padx=18, pady=(0, 10))
@@ -641,9 +726,13 @@ class MinigameFrame(ctk.CTkFrame):
                     print("Lỗi lưu điểm:", e)
             else:
                 self.sr_canvas.create_text(self.sr_canvas.winfo_width()/2, self.sr_canvas.winfo_height()/2 + 60, text="🔒 Bạn chưa đăng nhập. Điểm này chưa được lưu!", font=(FONT, 16), fill=COLORS["orange"])
-                # Bật popup nút bấm ngay giữa màn hình
-                self.btn_sr_login = ctk.CTkButton(self.sr_canvas.master, text="👤 Đăng nhập để lưu điểm", font=(FONT, 16, "bold"), fg_color=COLORS["blue"], command=lambda: login_and_save(self.sr_score))
-                self.btn_sr_login.place(relx=0.5, rely=0.85, anchor="center")
+                
+                # --- THÊM KHUNG CHỨA NÚT ĐĂNG NHẬP VÀ NÚT BỎ QUA ---
+                self.sr_auth_frame = ctk.CTkFrame(self.sr_canvas.master, fg_color="transparent")
+                self.sr_auth_frame.place(relx=0.5, rely=0.85, anchor="center")
+                
+                ctk.CTkButton(self.sr_auth_frame, text="👤 Đăng nhập để lưu", font=(FONT, 15, "bold"), fg_color=COLORS["blue"], hover_color="#0B62D5", height=42, command=lambda: login_and_save(self.sr_score)).pack(side="left", padx=8)
+                ctk.CTkButton(self.sr_auth_frame, text="Bỏ qua & Trở về", font=(FONT, 15, "bold"), fg_color=COLORS["panel_2"], hover_color=COLORS["stroke"], height=42, command=self.show_dashboard).pack(side="left", padx=8)
 
         def game_loop():
             if not self.sr_is_playing: return
@@ -758,8 +847,7 @@ class MinigameFrame(ctk.CTkFrame):
 
         def start_game():
             # Dọn dẹp nút "Đăng nhập" nếu nó đang hiện từ ván trước
-            if hasattr(self, 'btn_sr_login') and self.btn_sr_login.winfo_exists():
-                self.btn_sr_login.destroy()
+            if hasattr(self, 'sr_auth_frame') and self.sr_auth_frame.winfo_exists(): self.sr_auth_frame.destroy()
                 
             import cv2
             if not load_ai():
@@ -894,15 +982,9 @@ class MinigameFrame(ctk.CTkFrame):
                 ctk.CTkLabel(card, text="?", font=(FONT, 40, "bold"), text_color=COLORS["blue"]).pack(pady=40)
         
         # Ô trống chứa ký tự người dùng gõ
-        slots = ctk.CTkFrame(game, fg_color="transparent")
-        slots.grid(row=2, column=0, pady=18)
-        for i in range(len(self.word_target)):
-            char = self.word_user_input[i] if i < len(self.word_user_input) else ""
-            slot = ctk.CTkFrame(slots, width=65, height=65, fg_color=COLORS["panel_2"], border_color=COLORS["green"] if char else COLORS["blue_2"], border_width=2, corner_radius=10)
-            slot.pack(side="left", padx=8)
-            slot.pack_propagate(False)
-            ctk.CTkLabel(slot, text=char, font=(FONT, 28, "bold"), text_color=COLORS["text"]).place(relx=0.5, rely=0.5, anchor="center")
-            
+        self.word_slots_frame = ctk.CTkFrame(game, fg_color="transparent")
+        self.word_slots_frame.grid(row=2, column=0, pady=18)
+        self._update_word_slots() # Gọi hàm phụ để vẽ các ô
         # Bàn phím ảo
         bank = ctk.CTkFrame(game, fg_color="transparent")
         bank.grid(row=3, column=0, pady=8)
@@ -926,12 +1008,27 @@ class MinigameFrame(ctk.CTkFrame):
     def _click_word_letter(self, char):
         if len(self.word_user_input) < len(self.word_target):
             self.word_user_input.append(char)
-            self.show_word_game()
-
+            self._update_word_slots() # CHỈ VẼ LẠI Ô TRỐNG
+    def _update_word_slots(self):
+        """Chỉ vẽ lại các ô chữ đang nhập, không load lại toàn trang"""
+        if not hasattr(self, 'word_slots_frame') or not self.word_slots_frame.winfo_exists():
+            return
+            
+        # Xóa các ô cũ
+        for widget in self.word_slots_frame.winfo_children():
+            widget.destroy()
+            
+        # Vẽ lại các ô mới dựa trên chữ đã gõ
+        for i in range(len(self.word_target)):
+            char = self.word_user_input[i] if i < len(self.word_user_input) else ""
+            slot = ctk.CTkFrame(self.word_slots_frame, width=65, height=65, fg_color=COLORS["panel_2"], border_color=COLORS["green"] if char else COLORS["blue_2"], border_width=2, corner_radius=10)
+            slot.pack(side="left", padx=8)
+            slot.pack_propagate(False)
+            ctk.CTkLabel(slot, text=char, font=(FONT, 28, "bold"), text_color=COLORS["text"]).place(relx=0.5, rely=0.5, anchor="center")
     def _delete_word_letter(self):
         if self.word_user_input:
             self.word_user_input.pop()
-            self.show_word_game()
+            self._update_word_slots() # CHỈ VẼ LẠI Ô TRỐNG
 
     def _check_word_answer(self):
         if len(self.word_user_input) < len(self.word_target):
@@ -1030,7 +1127,13 @@ class MinigameFrame(ctk.CTkFrame):
                 print("Lỗi lưu điểm game ghép từ:", e)
         else:
             ctk.CTkLabel(db_frame, text="🔒 Bạn chưa đăng nhập. Điểm này chưa được lưu!", font=(FONT, 15), text_color=COLORS["orange"]).pack(pady=(0, 12))
-            ctk.CTkButton(db_frame, text="👤 Đăng nhập để lưu điểm", font=(FONT, 15, "bold"), fg_color=COLORS["blue"], hover_color="#0B62D5", height=40, command=lambda: login_and_save(self.word_score)).pack()
+            
+            # --- THÊM KHUNG CHỨA NÚT ĐĂNG NHẬP VÀ NÚT BỎ QUA ---
+            action_frame = ctk.CTkFrame(db_frame, fg_color="transparent")
+            action_frame.pack()
+            
+            ctk.CTkButton(action_frame, text="👤 Đăng nhập để lưu", font=(FONT, 15, "bold"), fg_color=COLORS["blue"], hover_color="#0B62D5", height=42, command=lambda: login_and_save(self.word_score)).pack(side="left", padx=8)
+            ctk.CTkButton(action_frame, text="Bỏ qua & Trở về", font=(FONT, 15, "bold"), fg_color=COLORS["panel_2"], hover_color=COLORS["stroke"], height=42, command=self.show_dashboard).pack(side="left", padx=8)
         # ==========================================================
 
         btn_frame = ctk.CTkFrame(card, fg_color="transparent")
@@ -1221,7 +1324,13 @@ class MinigameFrame(ctk.CTkFrame):
                 print("Lỗi lưu điểm game phản xạ:", e)
         else:
             ctk.CTkLabel(db_frame, text="🔒 Bạn chưa đăng nhập. Điểm này chưa được lưu!", font=(FONT, 15), text_color=COLORS["orange"]).pack(pady=(0, 12))
-            ctk.CTkButton(db_frame, text="👤 Đăng nhập để lưu điểm", font=(FONT, 15, "bold"), fg_color=COLORS["blue"], hover_color="#0B62D5", height=40, command=lambda: login_and_save(self.react_score)).pack()
+            
+            # --- THÊM KHUNG CHỨA NÚT ĐĂNG NHẬP VÀ NÚT BỎ QUA ---
+            action_frame = ctk.CTkFrame(db_frame, fg_color="transparent")
+            action_frame.pack()
+            
+            ctk.CTkButton(action_frame, text="👤 Đăng nhập để lưu", font=(FONT, 15, "bold"), fg_color=COLORS["blue"], hover_color="#0B62D5", height=42, command=lambda: login_and_save(self.react_score)).pack(side="left", padx=8)
+            ctk.CTkButton(action_frame, text="Bỏ qua & Trở về", font=(FONT, 15, "bold"), fg_color=COLORS["panel_2"], hover_color=COLORS["stroke"], height=42, command=self.show_dashboard).pack(side="left", padx=8)
         # ==========================================================
         
         btn_frame = ctk.CTkFrame(card, fg_color="transparent")
@@ -1409,6 +1518,7 @@ class MinigameFrame(ctk.CTkFrame):
             self.sc_is_playing = True
             load_next_puzzle()
             camera_loop()
+            timer_loop() # FIX 1: Chạy lại vòng lặp đồng hồ sau khi qua màn
 
         def check_win_condition():
             if len(self.sc_unlocked_chars) == len(self.sc_current_word):
@@ -1420,8 +1530,8 @@ class MinigameFrame(ctk.CTkFrame):
                 self.sc_is_playing = False
                 self.after(1500, resume_after_success)
             else:
-                next_char = self.sc_current_word[len(self.sc_unlocked_chars)]
-                self.lbl_sc_status.configure(text=f"Tuyệt! Giơ tiếp chữ cái: {next_char}", text_color=COLORS["blue_2"])
+                # FIX 3: Ẩn dòng chữ vàng báo hiệu chữ cái tiếp theo
+                self.lbl_sc_status.configure(text="")
 
         def load_next_puzzle():
             import random
@@ -1429,13 +1539,13 @@ class MinigameFrame(ctk.CTkFrame):
             self.sc_current_hint = puzzle[0]
             self.sc_current_word = puzzle[1]
             
-            # --- BÍ KÍP 1: KHỞI ĐẦU NHÂN ĐẠO ---
+            # Khởi đầu nhân đạo
             self.sc_unlocked_chars = [self.sc_current_word[0]] 
             
             self.lbl_sc_hint.configure(text=f"💡 {self.sc_current_hint}")
-            if len(self.sc_unlocked_chars) < len(self.sc_current_word):
-                next_char = self.sc_current_word[len(self.sc_unlocked_chars)]
-                self.lbl_sc_status.configure(text=f"Hãy giơ tay làm ký hiệu chữ cái: {next_char}", text_color=COLORS["orange"])
+            
+            # FIX 3: Ẩn dòng chữ vàng báo hiệu lúc bắt đầu
+            self.lbl_sc_status.configure(text="")
             render_slots()
 
         # --- LOGIC CỬA HÀNG HACKER ---
@@ -1460,6 +1570,17 @@ class MinigameFrame(ctk.CTkFrame):
                 self.sc_score -= 30
                 self.lbl_sc_score.configure(text=str(self.sc_score))
                 self.sc_time_left += 15
+                
+                # FIX 2: Cập nhật giao diện đồng hồ và thanh Progress Bar ngay lập tức
+                if hasattr(self, 'lbl_sc_time') and self.lbl_sc_time.winfo_exists():
+                    self.lbl_sc_time.configure(text=f"00:{self.sc_time_left:02d}")
+                    ratio = min(1.0, self.sc_time_left / 60.0)
+                    self.sc_timer_bar.set(ratio)
+                    if self.sc_time_left > 30: color = COLORS["green"]
+                    elif self.sc_time_left > 10: color = COLORS["orange"]
+                    else: color = COLORS["red"]
+                    self.lbl_sc_time.configure(text_color=color)
+                    self.sc_timer_bar.configure(progress_color=color)
             else:
                 from tkinter import messagebox
                 messagebox.showwarning("Thiếu Xu", "Bạn không đủ 30 xu để mua tính năng này!")
@@ -1502,7 +1623,7 @@ class MinigameFrame(ctk.CTkFrame):
             card.grid_columnconfigure(0, weight=1)
             
             ctk.CTkLabel(card, text="🔐", font=(FONT, 100)).pack(pady=(40, 10))
-            ctk.CTkLabel(card, text="HẾT GIỜ", font=(FONT, 36, "bold"), text_color=COLORS["red"]).pack(pady=(0, 10))
+            ctk.CTkLabel(card, text="KẾT THÚC", font=(FONT, 36, "bold"), text_color=COLORS["red"]).pack(pady=(0, 10))
             ctk.CTkLabel(card, text="Két sắt đã bị khóa chặt. Bạn đã thu thập được:", font=(FONT, 18), text_color=COLORS["muted"]).pack(pady=(0, 20))
             
             score_box = ctk.CTkFrame(card, fg_color="#080C11", corner_radius=16)
@@ -1510,7 +1631,7 @@ class MinigameFrame(ctk.CTkFrame):
             ctk.CTkLabel(score_box, text="Tiền thưởng Kỷ Lục", font=(FONT, 16), text_color=COLORS["muted"]).pack(pady=(20, 0))
             ctk.CTkLabel(score_box, text=f"💰 {self.sc_score} Xu", font=(FONT, 48, "bold"), text_color=COLORS["yellow"]).pack(padx=60, pady=(0, 20))
             
-            # XỬ LÝ DATABASE & ĐĂNG NHẬP
+            # --- XỬ LÝ DATABASE & ĐĂNG NHẬP ---
             db_frame = ctk.CTkFrame(card, fg_color="transparent")
             db_frame.pack(pady=(0, 30))
 
@@ -1527,13 +1648,18 @@ class MinigameFrame(ctk.CTkFrame):
                 except Exception as e: print("Lỗi lưu điểm game két sắt:", e)
             else:
                 ctk.CTkLabel(db_frame, text="🔒 Bạn chưa đăng nhập. Điểm này chưa được lưu!", font=(FONT, 15), text_color=COLORS["orange"]).pack(pady=(0, 12))
-                ctk.CTkButton(db_frame, text="👤 Đăng nhập để lưu điểm", font=(FONT, 15, "bold"), fg_color=COLORS["blue"], hover_color="#0B62D5", height=40, command=lambda: login_and_save(self.sc_score)).pack()
+                
+                # --- THÊM KHUNG CHỨA NÚT ĐĂNG NHẬP VÀ NÚT BỎ QUA ---
+                action_frame = ctk.CTkFrame(db_frame, fg_color="transparent")
+                action_frame.pack()
+                
+                ctk.CTkButton(action_frame, text="👤 Đăng nhập để lưu", font=(FONT, 15, "bold"), fg_color=COLORS["blue"], hover_color="#0B62D5", height=42, command=lambda: login_and_save(self.sc_score)).pack(side="left", padx=8)
+                ctk.CTkButton(action_frame, text="Bỏ qua & Trở về", font=(FONT, 15, "bold"), fg_color=COLORS["panel_2"], hover_color=COLORS["stroke"], height=42, command=self.show_dashboard).pack(side="left", padx=8)
 
             btn_frame = ctk.CTkFrame(card, fg_color="transparent")
             btn_frame.pack()
             ctk.CTkButton(btn_frame, text="⟳ Chơi lại", font=(FONT, 18, "bold"), height=54, width=180, fg_color=COLORS["blue"], command=self.show_safecracker_game).pack(side="left", padx=10)
             ctk.CTkButton(btn_frame, text="🏠 Về Menu", font=(FONT, 18, "bold"), height=54, width=180, fg_color=COLORS["card"], hover_color=COLORS["card_hover"], command=self.show_dashboard).pack(side="left", padx=10)
-
 
         def timer_loop():
             if not self.sc_is_playing: return
@@ -1542,7 +1668,6 @@ class MinigameFrame(ctk.CTkFrame):
                 if hasattr(self, 'lbl_sc_time') and self.lbl_sc_time.winfo_exists():
                     self.lbl_sc_time.configure(text=f"00:{self.sc_time_left:02d}")
                     
-                    # --- BÍ KÍP 2: UPDATE MÀU SẮC DỰA TRÊN ĐỒNG HỒ ---
                     ratio = min(1.0, self.sc_time_left / 60.0)
                     self.sc_timer_bar.set(ratio)
                     
@@ -1600,7 +1725,6 @@ class MinigameFrame(ctk.CTkFrame):
                 else:
                     self.lbl_sc_detect.configure(text="AI Đang thấy: --", text_color=COLORS["muted"])
 
-                # KIỂM TRA MẬT MÃ
                 if predicted_char and confidence > 0.75:
                     target_char_idx = len(self.sc_unlocked_chars)
                     if target_char_idx < len(self.sc_current_word):
@@ -1610,7 +1734,7 @@ class MinigameFrame(ctk.CTkFrame):
                             self.sc_unlocked_chars.append(needed_char)
                             self.sequence_data.clear()
                             render_slots()
-                            check_win_condition() # Tái sử dụng logic kiểm tra Win
+                            check_win_condition() 
 
                 h, w = frame.shape[:2]
                 scale = min(320/w, 200/h)
@@ -1639,7 +1763,15 @@ class MinigameFrame(ctk.CTkFrame):
             
             self.lbl_sc_score.configure(text="0")
             self.lbl_sc_time.configure(text="00:60", text_color=COLORS["green"])
-            self.btn_sc_start.configure(state="disabled", text="ĐANG GIẢI MÃ...", fg_color=COLORS["stroke"])
+            
+            # FIX 4: Đổi nút thành nút Chốt lời & Nghỉ
+            self.btn_sc_start.configure(
+                state="normal", 
+                text="⏹ CHỐT LỜI & NGHỈ", 
+                fg_color=COLORS["red"], 
+                hover_color="#8B0000",
+                command=game_over
+            )
             
             load_next_puzzle()
             
